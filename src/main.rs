@@ -6,6 +6,7 @@ mod agent;
 mod app;
 mod db;
 mod models;
+mod screens;
 mod ui;
 use app::App;
 
@@ -19,6 +20,10 @@ fn main() -> io::Result<()> {
     dotenvy::dotenv().ok();
     let db_runtime = Runtime::new()?;
     let pool = db_runtime.block_on(db::connect()).ok();
+    if let Some(pool) = &pool {
+        let _ = db_runtime.block_on(db::ensure_configuracoes_table(pool));
+        let _ = db_runtime.block_on(db::ensure_estampas_tables(pool));
+    }
     let tecidos = match &pool {
         Some(pool) => db_runtime
             .block_on(db::list_tecidos(pool))
@@ -31,9 +36,23 @@ fn main() -> io::Result<()> {
             .unwrap_or_default(),
         None => Vec::new(),
     };
+    let estampas = match &pool {
+        Some(pool) => db_runtime
+            .block_on(db::list_estampas(pool))
+            .unwrap_or_default(),
+        None => Vec::new(),
+    };
+    let selected_printer = match &pool {
+        Some(pool) => db_runtime
+            .block_on(db::get_config(pool, "receipt_printer"))
+            .ok()
+            .flatten(),
+        None => None,
+    };
 
     let mut terminal = setup_terminal()?;
-    let app_result = App::new(pool, tecidos, cores, db_runtime).run(&mut terminal);
+    let app_result =
+        App::new(pool, tecidos, cores, estampas, selected_printer, db_runtime).run(&mut terminal);
     restore_terminal(&mut terminal)?;
     app_result
 }

@@ -1,4 +1,7 @@
-use crate::db::{CorRecord, TecidoRecord};
+mod sku;
+pub use sku::{build_estampa_vinculo_sku, build_vinculo_sku};
+
+use crate::db::{CorRecord, EstampaRecord, TecidoRecord};
 
 #[derive(Clone, Copy, Default, Eq, PartialEq)]
 pub enum Focus {
@@ -52,7 +55,6 @@ pub enum VendasScreen {
     #[default]
     Menu,
     SelecionarTecido,
-    SelecionarTipo,
     SelecionarVinculo,
     Lancamento,
     Historico,
@@ -110,6 +112,8 @@ pub enum DadosScreen {
     CadastrarTecido,
     Cores,
     CadastrarCor,
+    Estampas,
+    CadastrarEstampa,
     VinculosMenu,
     VinculosSelecionarTecidoCriar,
     VinculosSelecionarTecidoVer,
@@ -122,6 +126,82 @@ pub struct CorForm {
     pub selected_field: CorField,
     pub hex: String,
     pub nome: String,
+}
+
+#[derive(Default)]
+pub struct EstampaForm {
+    pub selected_field: EstampaField,
+    pub nome: String,
+}
+
+impl EstampaForm {
+    pub fn push(&mut self, character: char) {
+        if self.selected_field == EstampaField::Nome && !character.is_control() {
+            self.nome.push(character);
+        }
+    }
+
+    pub fn backspace(&mut self) {
+        if self.selected_field == EstampaField::Nome {
+            self.nome.pop();
+        }
+    }
+
+    pub fn next_field(&mut self) {
+        self.selected_field = self.selected_field.next();
+    }
+
+    pub fn previous_field(&mut self) {
+        self.selected_field = self.selected_field.previous();
+    }
+
+    pub fn is_valid(&self) -> bool {
+        !self.nome.trim().is_empty()
+    }
+
+    pub fn sku(&self, estampas: &[EstampaRecord], editing_id: Option<i64>) -> String {
+        sku::build_estampa_sku(&self.nome, estampas, editing_id)
+    }
+
+    pub fn from_record(estampa: &EstampaRecord) -> Self {
+        Self {
+            selected_field: EstampaField::Nome,
+            nome: estampa.nome.clone(),
+        }
+    }
+}
+
+#[derive(Clone, Copy, Default, Eq, PartialEq)]
+pub enum EstampaField {
+    #[default]
+    Nome,
+    Confirmar,
+    Voltar,
+    Excluir,
+}
+
+impl EstampaField {
+    const ALL: [EstampaField; 4] = [
+        EstampaField::Nome,
+        EstampaField::Confirmar,
+        EstampaField::Voltar,
+        EstampaField::Excluir,
+    ];
+
+    pub fn next(self) -> Self {
+        Self::ALL[(self.index() + 1) % Self::ALL.len()]
+    }
+
+    pub fn previous(self) -> Self {
+        Self::ALL[(self.index() + Self::ALL.len() - 1) % Self::ALL.len()]
+    }
+
+    fn index(self) -> usize {
+        Self::ALL
+            .iter()
+            .position(|field| *field == self)
+            .unwrap_or(0)
+    }
 }
 
 impl CorForm {
@@ -150,7 +230,7 @@ impl CorForm {
     }
 
     pub fn sku(&self, cores: &[CorRecord], editing_id: Option<i64>) -> String {
-        build_cor_sku(&self.nome, cores, editing_id)
+        sku::build_cor_sku(&self.nome, cores, editing_id)
     }
 
     pub fn from_record(cor: &CorRecord) -> Self {
@@ -249,9 +329,9 @@ impl TecidoForm {
     }
 
     pub fn sku(&self, tecidos: &[TecidoRecord], editing_id: Option<i64>) -> String {
-        let skus = existing_skus(tecidos, editing_id);
+        let skus = sku::existing_skus(tecidos, editing_id);
         let sku_refs: Vec<&str> = skus.iter().map(String::as_str).collect();
-        build_sku(&self.nome, &sku_refs)
+        sku::build_sku(&self.nome, &sku_refs)
     }
 
     pub fn calculated_values(&self) -> CalculatedTecidoValues {
@@ -484,13 +564,15 @@ pub enum DadosOption {
     #[default]
     Tecido,
     Cores,
+    Estampas,
     Vinculos,
 }
 
 impl DadosOption {
-    pub const ALL: [DadosOption; 3] = [
+    pub const ALL: [DadosOption; 4] = [
         DadosOption::Tecido,
         DadosOption::Cores,
+        DadosOption::Estampas,
         DadosOption::Vinculos,
     ];
 
@@ -498,6 +580,7 @@ impl DadosOption {
         match self {
             DadosOption::Tecido => "Tecido",
             DadosOption::Cores => "Cores",
+            DadosOption::Estampas => "Estampas",
             DadosOption::Vinculos => "Vinculos",
         }
     }
@@ -526,15 +609,17 @@ pub enum Section {
     Pedidos,
     Dados,
     Estoque,
+    Configuracoes,
 }
 
 impl Section {
-    pub const ALL: [Section; 5] = [
+    pub const ALL: [Section; 6] = [
         Section::Dashboard,
         Section::Vendas,
         Section::Pedidos,
         Section::Dados,
         Section::Estoque,
+        Section::Configuracoes,
     ];
 
     pub fn title(self) -> &'static str {
@@ -544,6 +629,7 @@ impl Section {
             Section::Pedidos => "Pedidos",
             Section::Dados => "Dados",
             Section::Estoque => "Estoque",
+            Section::Configuracoes => "Configuracoes",
         }
     }
 
@@ -607,116 +693,4 @@ pub fn parse_largura_m(value: &str) -> Option<f64> {
     } else {
         Some(number / 100.0)
     }
-}
-
-pub fn build_vinculo_sku(tecido: &TecidoRecord, cor: &CorRecord) -> String {
-    let cor_sku = cor.sku.as_deref().unwrap_or("____-__");
-    format!("{}-{}", tecido.sku, cor_sku)
-}
-
-fn existing_skus(tecidos: &[TecidoRecord], editing_id: Option<i64>) -> Vec<String> {
-    tecidos
-        .iter()
-        .filter(|tecido| Some(tecido.id) != editing_id)
-        .map(|tecido| {
-            if tecido.sku.trim().is_empty() {
-                build_sku(&tecido.nome, &[])
-            } else {
-                tecido.sku.clone()
-            }
-        })
-        .collect()
-}
-
-fn build_cor_sku(name: &str, cores: &[CorRecord], editing_id: Option<i64>) -> String {
-    let prefix = build_cor_sku_prefix(name);
-    let next_sequence = cores
-        .iter()
-        .filter(|cor| Some(cor.id) != editing_id)
-        .filter_map(|cor| cor.sku.as_deref())
-        .filter(|sku| sku.starts_with(&prefix))
-        .filter_map(|sku| sku.rsplit_once('-')?.1.parse::<u16>().ok())
-        .max()
-        .unwrap_or(0)
-        + 1;
-
-    format!("{prefix}-{next_sequence:02}")
-}
-
-fn build_cor_sku_prefix(name: &str) -> String {
-    let words: Vec<String> = name
-        .split_whitespace()
-        .map(|word| {
-            word.chars()
-                .filter(|character| character.is_ascii_alphanumeric())
-                .collect::<String>()
-                .to_uppercase()
-        })
-        .filter(|word| !word.is_empty())
-        .collect();
-
-    let family = words.first().map(String::as_str).unwrap_or("");
-    let color = words.last().map(String::as_str).unwrap_or(family);
-
-    pad_sku(format!(
-        "{}{}",
-        first_chars(family, 2),
-        first_chars(color, 2)
-    ))
-}
-
-fn build_sku(name: &str, existing_skus: &[&str]) -> String {
-    let words: Vec<String> = name
-        .split_whitespace()
-        .map(|word| {
-            word.chars()
-                .filter(|character| character.is_ascii_alphanumeric())
-                .collect::<String>()
-                .to_uppercase()
-        })
-        .filter(|word| !word.is_empty())
-        .collect();
-
-    if words.is_empty() {
-        return String::from("____");
-    }
-
-    let mut sku = if words.len() == 1 {
-        first_chars(&words[0], 4)
-    } else {
-        format!(
-            "{}{}",
-            first_chars(words.first().unwrap(), 2),
-            first_chars(words.last().unwrap(), 2)
-        )
-    };
-
-    sku = pad_sku(sku);
-
-    if !existing_skus.iter().any(|existing| *existing == sku) {
-        return sku;
-    }
-
-    if let Some(word) = words.first() {
-        for character in word.chars().skip(3) {
-            let mut candidate = sku.clone();
-            candidate.replace_range(3..4, &character.to_string());
-            if !existing_skus.iter().any(|existing| *existing == candidate) {
-                return candidate;
-            }
-        }
-    }
-
-    sku
-}
-
-fn first_chars(value: &str, count: usize) -> String {
-    value.chars().take(count).collect()
-}
-
-fn pad_sku(mut sku: String) -> String {
-    while sku.len() < 4 {
-        sku.push('X');
-    }
-    sku.chars().take(4).collect()
 }

@@ -15,6 +15,91 @@ pub async fn connect() -> Result<PgPool, sqlx::Error> {
         .await
 }
 
+pub async fn ensure_configuracoes_table(pool: &PgPool) -> Result<(), sqlx::Error> {
+    sqlx::query(
+        r#"
+        CREATE TABLE IF NOT EXISTS configuracoes (
+            chave TEXT PRIMARY KEY,
+            valor TEXT NOT NULL,
+            updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+        )
+        "#,
+    )
+    .execute(pool)
+    .await?;
+
+    Ok(())
+}
+
+pub async fn ensure_estampas_tables(pool: &PgPool) -> Result<(), sqlx::Error> {
+    sqlx::query(
+        r#"
+        CREATE TABLE IF NOT EXISTS estampas (
+            id BIGSERIAL PRIMARY KEY,
+            nome TEXT NOT NULL,
+            sku TEXT UNIQUE,
+            created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+        )
+        "#,
+    )
+    .execute(pool)
+    .await?;
+
+    sqlx::query(
+        r#"
+        CREATE TABLE IF NOT EXISTS tecido_estampas (
+            id BIGSERIAL PRIMARY KEY,
+            tecido_id BIGINT NOT NULL REFERENCES tecidos(id) ON DELETE CASCADE,
+            estampa_id BIGINT NOT NULL REFERENCES estampas(id) ON DELETE RESTRICT,
+            sku TEXT UNIQUE,
+            created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+            UNIQUE (tecido_id, estampa_id)
+        )
+        "#,
+    )
+    .execute(pool)
+    .await?;
+
+    sqlx::query(
+        "CREATE INDEX IF NOT EXISTS idx_tecido_estampas_tecido_id ON tecido_estampas(tecido_id)",
+    )
+    .execute(pool)
+    .await?;
+    sqlx::query(
+        "CREATE INDEX IF NOT EXISTS idx_tecido_estampas_estampa_id ON tecido_estampas(estampa_id)",
+    )
+    .execute(pool)
+    .await?;
+
+    Ok(())
+}
+
+pub async fn get_config(pool: &PgPool, chave: &str) -> Result<Option<String>, sqlx::Error> {
+    let row = sqlx::query("SELECT valor FROM configuracoes WHERE chave = $1")
+        .bind(chave)
+        .fetch_optional(pool)
+        .await?;
+
+    Ok(row.map(|row| row.get("valor")))
+}
+
+pub async fn set_config(pool: &PgPool, chave: &str, valor: &str) -> Result<(), sqlx::Error> {
+    sqlx::query(
+        r#"
+        INSERT INTO configuracoes (chave, valor, updated_at)
+        VALUES ($1, $2, NOW())
+        ON CONFLICT (chave)
+        DO UPDATE SET valor = EXCLUDED.valor, updated_at = NOW()
+        "#,
+    )
+    .bind(chave)
+    .bind(valor)
+    .execute(pool)
+    .await?;
+
+    Ok(())
+}
+
 #[derive(Clone)]
 pub struct TecidoRecord {
     pub id: i64,
@@ -37,6 +122,13 @@ pub struct CorRecord {
     pub nome: String,
     pub sku: Option<String>,
     pub codigo_hex: Option<String>,
+}
+
+#[derive(Clone)]
+pub struct EstampaRecord {
+    pub id: i64,
+    pub nome: String,
+    pub sku: Option<String>,
 }
 
 #[derive(Clone)]
@@ -248,6 +340,56 @@ pub async fn delete_cor(pool: &PgPool, id: i64) -> Result<(), sqlx::Error> {
     Ok(())
 }
 
+pub async fn list_estampas(pool: &PgPool) -> Result<Vec<EstampaRecord>, sqlx::Error> {
+    let rows = sqlx::query("SELECT id, nome, sku FROM estampas ORDER BY nome, id")
+        .fetch_all(pool)
+        .await?;
+
+    Ok(rows
+        .into_iter()
+        .map(|row| EstampaRecord {
+            id: row.get("id"),
+            nome: row.get("nome"),
+            sku: row.get("sku"),
+        })
+        .collect())
+}
+
+pub async fn insert_estampa(pool: &PgPool, nome: &str, sku: &str) -> Result<(), sqlx::Error> {
+    sqlx::query("INSERT INTO estampas (nome, sku) VALUES ($1, $2)")
+        .bind(nome.trim())
+        .bind(sku)
+        .execute(pool)
+        .await?;
+
+    Ok(())
+}
+
+pub async fn update_estampa(
+    pool: &PgPool,
+    id: i64,
+    nome: &str,
+    sku: &str,
+) -> Result<(), sqlx::Error> {
+    sqlx::query("UPDATE estampas SET nome = $1, sku = $2 WHERE id = $3")
+        .bind(nome.trim())
+        .bind(sku)
+        .bind(id)
+        .execute(pool)
+        .await?;
+
+    Ok(())
+}
+
+pub async fn delete_estampa(pool: &PgPool, id: i64) -> Result<(), sqlx::Error> {
+    sqlx::query("DELETE FROM estampas WHERE id = $1")
+        .bind(id)
+        .execute(pool)
+        .await?;
+
+    Ok(())
+}
+
 pub async fn list_vinculos_by_tecido(
     pool: &PgPool,
     tecido_id: i64,
@@ -283,11 +425,50 @@ pub async fn list_vinculos_by_tecido(
         .collect())
 }
 
+pub async fn list_estampa_vinculos_by_tecido(
+    pool: &PgPool,
+    tecido_id: i64,
+) -> Result<Vec<VinculoRecord>, sqlx::Error> {
+    let rows = sqlx::query(
+        r#"
+        SELECT
+            te.estampa_id AS cor_id,
+            t.nome AS tecido_nome,
+            e.nome AS cor_nome,
+            NULL::text AS cor_hex,
+            te.sku
+        FROM tecido_estampas te
+        JOIN tecidos t ON t.id = te.tecido_id
+        JOIN estampas e ON e.id = te.estampa_id
+        WHERE te.tecido_id = $1
+        ORDER BY e.nome, e.id
+        "#,
+    )
+    .bind(tecido_id)
+    .fetch_all(pool)
+    .await?;
+
+    Ok(rows
+        .into_iter()
+        .map(|row| VinculoRecord {
+            cor_id: row.get("cor_id"),
+            tecido_nome: row.get("tecido_nome"),
+            cor_nome: row.get("cor_nome"),
+            cor_hex: row.get("cor_hex"),
+            sku: row.get("sku"),
+        })
+        .collect())
+}
+
 pub async fn list_vinculos_by_tecido_and_tipo(
     pool: &PgPool,
     tecido_id: i64,
     tipo: &str,
 ) -> Result<Vec<VinculoRecord>, sqlx::Error> {
+    if tipo == "Estampado" {
+        return list_estampa_vinculos_by_tecido(pool, tecido_id).await;
+    }
+
     let rows = sqlx::query(
         r#"
         SELECT
@@ -337,6 +518,32 @@ pub async fn replace_vinculos(
         sqlx::query("INSERT INTO tecido_cores (tecido_id, cor_id, sku) VALUES ($1, $2, $3)")
             .bind(tecido_id)
             .bind(cor_id)
+            .bind(sku)
+            .execute(&mut *transaction)
+            .await?;
+    }
+
+    transaction.commit().await?;
+
+    Ok(())
+}
+
+pub async fn replace_estampa_vinculos(
+    pool: &PgPool,
+    tecido_id: i64,
+    vinculos: &[(i64, String)],
+) -> Result<(), sqlx::Error> {
+    let mut transaction = pool.begin().await?;
+
+    sqlx::query("DELETE FROM tecido_estampas WHERE tecido_id = $1")
+        .bind(tecido_id)
+        .execute(&mut *transaction)
+        .await?;
+
+    for (estampa_id, sku) in vinculos {
+        sqlx::query("INSERT INTO tecido_estampas (tecido_id, estampa_id, sku) VALUES ($1, $2, $3)")
+            .bind(tecido_id)
+            .bind(estampa_id)
             .bind(sku)
             .execute(&mut *transaction)
             .await?;

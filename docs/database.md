@@ -28,6 +28,25 @@ DATABASE_URL=postgres://razai:razai_dev@localhost:5432/razai_tui
 
 As migrations ficam em `migrations/`. Na primeira vez que o container sobe, o Postgres executa os arquivos `.sql` dessa pasta.
 
+Tabelas principais:
+
+- `tecidos`: tecidos cadastrados, SKU, composicao, largura, tipo e gramaturas.
+- `cores`: cores cadastradas, hexadecimal, swatch derivado e SKU.
+- `estampas`: estampas cadastradas e SKU.
+- `tecido_cores`: vinculos de tecidos lisos com cores.
+- `tecido_estampas`: vinculos de tecidos estampados com estampas.
+- `configuracoes`: configuracoes locais persistidas no banco, como impressora de recibos.
+
+O app tambem garante em runtime as tabelas `configuracoes`, `estampas` e `tecido_estampas`, porque bancos locais antigos podem ter sido criados antes dessas migrations.
+
+## Configuracoes
+
+Configuracoes usam pares `chave`/`valor`.
+
+| Chave | Uso |
+| --- | --- |
+| `receipt_printer` | Nome da impressora de recibos 80mm selecionada em `Configuracoes`. |
+
 Se precisar recriar o banco do zero:
 
 ```powershell

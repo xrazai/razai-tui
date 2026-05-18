@@ -1,0 +1,444 @@
+use ratatui::{
+    Frame,
+    layout::{Alignment, Constraint, Direction, Layout, Rect},
+    style::{Color, Style},
+    text::{Line, Span, Text},
+    widgets::{Block, Borders, Paragraph},
+};
+
+use crate::{
+    db::{CorRecord, EstampaRecord, TecidoRecord},
+    models::*,
+    ui::{centered_rect, color_swatch, selected_style},
+};
+
+pub(super) fn render_cadastrar_cor(
+    frame: &mut Frame,
+    area: Rect,
+    form: &CorForm,
+    cores: &[CorRecord],
+    editing_id: Option<i64>,
+    pending_delete: bool,
+) {
+    let lines = vec![
+        format_cor_hex_field(CorField::Hex, form.selected_field, "Hex", &form.hex),
+        format_cor_field(
+            CorField::Nome,
+            form.selected_field,
+            "Nome da Cor",
+            &form.nome,
+        ),
+        Line::from(""),
+        format_cor_action(
+            CorField::Confirmar,
+            form.selected_field,
+            "[Confirmar]",
+            form.is_valid(),
+        ),
+        format_cor_action(CorField::Voltar, form.selected_field, "[Voltar]", true),
+        if editing_id.is_some() {
+            format_cor_action(CorField::Excluir, form.selected_field, "[Excluir]", true)
+        } else {
+            Line::from("")
+        },
+    ];
+    let form_widget = Paragraph::new(Text::from(lines)).block(
+        Block::default()
+            .title("Dados > Cores > Cadastrar Cor")
+            .borders(Borders::ALL),
+    );
+    let chunks = Layout::default()
+        .direction(Direction::Horizontal)
+        .constraints([Constraint::Min(40), Constraint::Length(22)])
+        .split(area);
+    let sku = Paragraph::new(form.sku(cores, editing_id))
+        .block(Block::default().title("SKU").borders(Borders::ALL))
+        .alignment(Alignment::Center)
+        .style(Style::default().fg(Color::White));
+
+    frame.render_widget(form_widget, chunks[0]);
+    frame.render_widget(sku, chunks[1]);
+
+    if pending_delete {
+        render_confirm_dialog(frame, area, "Excluir esta cor?");
+    }
+}
+
+pub(super) fn render_cadastrar_estampa(
+    frame: &mut Frame,
+    area: Rect,
+    form: &EstampaForm,
+    estampas: &[EstampaRecord],
+    editing_id: Option<i64>,
+    pending_delete: bool,
+) {
+    let lines = vec![
+        format_estampa_field(
+            EstampaField::Nome,
+            form.selected_field,
+            "Nome da Estampa",
+            &form.nome,
+        ),
+        Line::from(""),
+        format_estampa_action(
+            EstampaField::Confirmar,
+            form.selected_field,
+            "[Confirmar]",
+            form.is_valid(),
+        ),
+        format_estampa_action(EstampaField::Voltar, form.selected_field, "[Voltar]", true),
+        if editing_id.is_some() {
+            format_estampa_action(
+                EstampaField::Excluir,
+                form.selected_field,
+                "[Excluir]",
+                true,
+            )
+        } else {
+            Line::from("")
+        },
+    ];
+    let form_widget = Paragraph::new(Text::from(lines)).block(
+        Block::default()
+            .title("Dados > Estampas > Cadastrar Estampa")
+            .borders(Borders::ALL),
+    );
+    let chunks = Layout::default()
+        .direction(Direction::Horizontal)
+        .constraints([Constraint::Min(40), Constraint::Length(22)])
+        .split(area);
+    let sku = Paragraph::new(form.sku(estampas, editing_id))
+        .block(Block::default().title("SKU").borders(Borders::ALL))
+        .alignment(Alignment::Center)
+        .style(Style::default().fg(Color::White));
+
+    frame.render_widget(form_widget, chunks[0]);
+    frame.render_widget(sku, chunks[1]);
+
+    if pending_delete {
+        render_confirm_dialog(frame, area, "Excluir esta estampa?");
+    }
+}
+
+pub(super) fn render_cadastrar_tecido(
+    frame: &mut Frame,
+    area: Rect,
+    form: &TecidoForm,
+    tecidos: &[TecidoRecord],
+    editing_tecido_id: Option<i64>,
+    pending_delete: bool,
+) {
+    let chunks = Layout::default()
+        .direction(Direction::Horizontal)
+        .constraints([Constraint::Min(40), Constraint::Length(22)])
+        .split(area);
+    let calculated = form.calculated_values();
+    let fields = vec![
+        format_field(
+            TecidoField::Nome,
+            form.selected_field,
+            "Nome *",
+            &form.nome,
+            None,
+        ),
+        format_field(
+            TecidoField::Composicao,
+            form.selected_field,
+            "Composicao *",
+            &form.composicao,
+            None,
+        ),
+        format_field(
+            TecidoField::Largura,
+            form.selected_field,
+            "Largura *",
+            &form.largura,
+            None,
+        ),
+        format_select(
+            TecidoField::Tipo,
+            form.selected_field,
+            "Tipo",
+            form.tipo.value(TIPO_OPTIONS),
+        ),
+        format_select(
+            TecidoField::Transparencia,
+            form.selected_field,
+            "Transparencia",
+            form.transparencia.value(NIVEL_OPTIONS),
+        ),
+        format_select(
+            TecidoField::Elasticidade,
+            form.selected_field,
+            "Elasticidade",
+            form.elasticidade.value(NIVEL_OPTIONS),
+        ),
+        format_select(
+            TecidoField::Acabamento,
+            form.selected_field,
+            "Acabamento",
+            form.acabamento.value(ACABAMENTO_OPTIONS),
+        ),
+        format_field(
+            TecidoField::Rendimento,
+            form.selected_field,
+            "Rendimento m/kg",
+            &form.rendimento,
+            calculated.rendimento,
+        ),
+        format_field(
+            TecidoField::GramaturaLinear,
+            form.selected_field,
+            "Gramatura Linear g/m",
+            &form.gramatura_linear,
+            calculated.gramatura_linear,
+        ),
+        format_field(
+            TecidoField::GramaturaM2,
+            form.selected_field,
+            "Gramatura g/m2",
+            &form.gramatura_m2,
+            calculated.gramatura_m2,
+        ),
+        Line::from(""),
+        format_submit(
+            form.selected_field,
+            form.is_valid(),
+            editing_tecido_id.is_some(),
+        ),
+        format_tecido_action(TecidoField::Voltar, form.selected_field, "[Voltar]"),
+        format_delete(form.selected_field, editing_tecido_id.is_some()),
+    ];
+    let form_widget = Paragraph::new(Text::from(fields))
+        .block(
+            Block::default()
+                .title("Dados > Tecido > Cadastrar tecido")
+                .borders(Borders::ALL),
+        )
+        .alignment(Alignment::Left);
+    let sku = Paragraph::new(form.sku(tecidos, editing_tecido_id))
+        .block(Block::default().title("SKU").borders(Borders::ALL))
+        .alignment(Alignment::Center)
+        .style(Style::default().fg(Color::White));
+
+    frame.render_widget(form_widget, chunks[0]);
+    frame.render_widget(sku, chunks[1]);
+
+    if pending_delete {
+        render_confirm_dialog(frame, area, "Excluir este tecido?");
+    }
+}
+
+pub(super) fn format_field(
+    field: TecidoField,
+    selected: TecidoField,
+    label: &str,
+    value: &str,
+    calculated: Option<f64>,
+) -> Line<'static> {
+    let marker = if field == selected { ">" } else { " " };
+    let value = if value.is_empty() { "_" } else { value };
+    let mut spans = vec![
+        Span::styled(format!("{marker} "), selected_style(field == selected)),
+        Span::raw(format!("{label}: ")),
+        Span::styled(value.to_string(), Style::default().fg(Color::Yellow)),
+    ];
+
+    if let Some(number) = calculated {
+        let calculated = match field {
+            TecidoField::GramaturaLinear | TecidoField::GramaturaM2 => {
+                format!("  calculado: {}", round_to_nearest_ten(number))
+            }
+            _ => format!("  calculado: {:.2}", number),
+        };
+        spans.push(Span::raw(calculated));
+    }
+
+    Line::from(spans)
+}
+
+pub(super) fn format_select(
+    field: TecidoField,
+    selected: TecidoField,
+    label: &str,
+    value: &str,
+) -> Line<'static> {
+    let marker = if field == selected { ">" } else { " " };
+
+    Line::from(vec![
+        Span::styled(format!("{marker} "), selected_style(field == selected)),
+        Span::raw(format!("{label}: ")),
+        Span::styled(format!("[{value}]"), Style::default().fg(Color::Yellow)),
+    ])
+}
+
+pub(super) fn format_cor_field(
+    field: CorField,
+    selected: CorField,
+    label: &str,
+    value: &str,
+) -> Line<'static> {
+    let marker = if field == selected { ">" } else { " " };
+    let value = if value.is_empty() {
+        if field == CorField::Hex { "#" } else { "_" }
+    } else {
+        value
+    };
+
+    Line::from(vec![
+        Span::styled(format!("{marker} "), selected_style(field == selected)),
+        Span::raw(format!("{label}: ")),
+        Span::styled(value.to_string(), Style::default().fg(Color::Yellow)),
+    ])
+}
+
+pub(super) fn format_cor_hex_field(
+    field: CorField,
+    selected: CorField,
+    label: &str,
+    value: &str,
+) -> Line<'static> {
+    let marker = if field == selected { ">" } else { " " };
+    let value = if value.is_empty() { "#" } else { value };
+
+    Line::from(vec![
+        Span::styled(format!("{marker} "), selected_style(field == selected)),
+        Span::raw(format!("{label}: ")),
+        Span::styled(value.to_string(), Style::default().fg(Color::Yellow)),
+        Span::raw("  "),
+        color_swatch(value),
+        if parse_hex_color(value).is_some() {
+            Span::raw("")
+        } else {
+            Span::raw("  hex invalido, use #RRGGBB")
+        },
+    ])
+}
+
+pub(super) fn format_cor_action(
+    field: CorField,
+    selected: CorField,
+    label: &str,
+    enabled: bool,
+) -> Line<'static> {
+    let marker = if field == selected { ">" } else { " " };
+    let suffix = if enabled {
+        ""
+    } else {
+        "  campos obrigatorios pendentes"
+    };
+
+    Line::from(vec![
+        Span::styled(format!("{marker} "), selected_style(field == selected)),
+        Span::raw(label.to_string()),
+        Span::raw(suffix),
+    ])
+}
+
+pub(super) fn format_estampa_field(
+    field: EstampaField,
+    selected: EstampaField,
+    label: &str,
+    value: &str,
+) -> Line<'static> {
+    let marker = if field == selected { ">" } else { " " };
+    let value = if value.is_empty() { "_" } else { value };
+
+    Line::from(vec![
+        Span::styled(format!("{marker} "), selected_style(field == selected)),
+        Span::raw(format!("{label}: ")),
+        Span::styled(value.to_string(), Style::default().fg(Color::Yellow)),
+    ])
+}
+
+pub(super) fn format_estampa_action(
+    field: EstampaField,
+    selected: EstampaField,
+    label: &str,
+    enabled: bool,
+) -> Line<'static> {
+    let marker = if field == selected { ">" } else { " " };
+    let suffix = if enabled {
+        ""
+    } else {
+        "  campos obrigatorios pendentes"
+    };
+
+    Line::from(vec![
+        Span::styled(format!("{marker} "), selected_style(field == selected)),
+        Span::raw(label.to_string()),
+        Span::raw(suffix),
+    ])
+}
+
+pub(super) fn format_submit(selected: TecidoField, valid: bool, editing: bool) -> Line<'static> {
+    let marker = if selected == TecidoField::Salvar {
+        ">"
+    } else {
+        " "
+    };
+    let status = if valid {
+        ""
+    } else {
+        "  campos obrigatorios pendentes"
+    };
+
+    Line::from(vec![
+        Span::styled(
+            format!("{marker} "),
+            selected_style(selected == TecidoField::Salvar),
+        ),
+        Span::raw(if editing {
+            "[Confirmar]"
+        } else {
+            "[Confirmar]"
+        }),
+        Span::raw(status),
+    ])
+}
+
+pub(super) fn format_delete(selected: TecidoField, editing: bool) -> Line<'static> {
+    if !editing {
+        return Line::from("");
+    }
+
+    let marker = if selected == TecidoField::Excluir {
+        ">"
+    } else {
+        " "
+    };
+
+    Line::from(vec![
+        Span::styled(
+            format!("{marker} "),
+            selected_style(selected == TecidoField::Excluir),
+        ),
+        Span::raw("[Excluir]"),
+    ])
+}
+
+pub(super) fn format_tecido_action(
+    field: TecidoField,
+    selected: TecidoField,
+    label: &str,
+) -> Line<'static> {
+    let marker = if field == selected { ">" } else { " " };
+    Line::from(vec![
+        Span::styled(format!("{marker} "), selected_style(field == selected)),
+        Span::raw(label.to_string()),
+    ])
+}
+
+pub(super) fn render_confirm_dialog(frame: &mut Frame, area: Rect, message: &str) {
+    let popup_area = centered_rect(54, 7, area);
+    let dialog = Paragraph::new(format!("{message}\n\nS = confirmar   N/Esc = cancelar"))
+        .block(
+            Block::default()
+                .title("Confirmacao destrutiva")
+                .borders(Borders::ALL)
+                .border_style(Style::default().fg(Color::Cyan)),
+        )
+        .alignment(Alignment::Center);
+
+    frame.render_widget(dialog, popup_area);
+}

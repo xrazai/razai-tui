@@ -1,4 +1,4 @@
-use crate::models::{DadosOption, DadosScreen, Section, TecidoForm};
+use crate::models::{DadosOption, DadosScreen, Section, TecidoForm, VendasScreen};
 use serde::{Deserialize, Serialize};
 
 pub struct SkillContext {
@@ -10,71 +10,104 @@ pub fn active_skill(
     section: Section,
     dados_screen: DadosScreen,
     dados_option: DadosOption,
+    vendas_screen: VendasScreen,
 ) -> SkillContext {
-    match (section, dados_screen, dados_option) {
-        (Section::Dados, DadosScreen::CadastrarTecido, _) => SkillContext {
+    match (section, dados_screen, dados_option, vendas_screen) {
+        (Section::Dados, DadosScreen::CadastrarTecido, _, _) => SkillContext {
             name: "dados.tecidos.cadastro",
             description: "Ajuda no cadastro de tecidos, validacao de campos, SKU e calculos de gramatura.",
         },
-        (Section::Dados, DadosScreen::Tecidos, _) => SkillContext {
+        (Section::Dados, DadosScreen::Tecidos, _, _) => SkillContext {
             name: "dados.tecidos.lista",
             description: "Ajuda a consultar tecidos cadastrados e iniciar novos cadastros.",
         },
-        (Section::Dados, DadosScreen::Cores, _) => SkillContext {
+        (Section::Dados, DadosScreen::Cores, _, _) => SkillContext {
             name: "dados.cores.lista",
             description: "Ajuda a consultar cores cadastradas e iniciar novos cadastros.",
         },
-        (Section::Dados, DadosScreen::CadastrarCor, _) => SkillContext {
+        (Section::Dados, DadosScreen::CadastrarCor, _, _) => SkillContext {
             name: "dados.cores.cadastro",
             description: "Ajuda no cadastro de cores, validacao de hexadecimal e nome.",
         },
-        (Section::Dados, DadosScreen::VinculosMenu, _) => SkillContext {
+        (Section::Dados, DadosScreen::Estampas, _, _) => SkillContext {
+            name: "dados.estampas.lista",
+            description: "Ajuda a consultar estampas cadastradas e iniciar novos cadastros.",
+        },
+        (Section::Dados, DadosScreen::CadastrarEstampa, _, _) => SkillContext {
+            name: "dados.estampas.cadastro",
+            description: "Ajuda no cadastro de estampas e geracao automatica de SKU.",
+        },
+        (Section::Dados, DadosScreen::VinculosMenu, _, _) => SkillContext {
             name: "dados.vinculos.menu",
             description: "Ajuda a escolher entre criar vinculos e consultar vinculos existentes.",
         },
-        (Section::Dados, DadosScreen::VinculosSelecionarTecidoCriar, _) => SkillContext {
+        (Section::Dados, DadosScreen::VinculosSelecionarTecidoCriar, _, _) => SkillContext {
             name: "dados.vinculos.criar.tecido",
-            description: "Ajuda a selecionar o tecido que recebera vinculos de cores.",
+            description: "Ajuda a selecionar o tecido que recebera vinculos de cores ou estampas conforme o tipo.",
         },
-        (Section::Dados, DadosScreen::VinculosSelecionarCores, _) => SkillContext {
-            name: "dados.vinculos.criar.cores",
-            description: "Ajuda a selecionar uma ou varias cores para vincular ao tecido.",
+        (Section::Dados, DadosScreen::VinculosSelecionarCores, _, _) => SkillContext {
+            name: "dados.vinculos.criar.itens",
+            description: "Ajuda a selecionar uma ou varias cores para tecido liso, ou estampas para tecido estampado.",
         },
-        (Section::Dados, DadosScreen::VinculosSelecionarTecidoVer, _) => SkillContext {
+        (Section::Dados, DadosScreen::VinculosSelecionarTecidoVer, _, _) => SkillContext {
             name: "dados.vinculos.ver.tecido",
             description: "Ajuda a selecionar um tecido para consultar cores vinculadas.",
         },
-        (Section::Dados, DadosScreen::VinculosLista, _) => SkillContext {
+        (Section::Dados, DadosScreen::VinculosLista, _, _) => SkillContext {
             name: "dados.vinculos.lista",
-            description: "Ajuda a consultar os vinculos existentes de tecido e cor.",
+            description: "Ajuda a consultar os vinculos existentes de tecido com cor ou estampa.",
         },
-        (Section::Dados, DadosScreen::Menu, DadosOption::Tecido) => SkillContext {
+        (Section::Dados, DadosScreen::Menu, DadosOption::Tecido, _) => SkillContext {
             name: "dados.tecidos",
             description: "Ajuda com dados de tecidos.",
         },
-        (Section::Dados, DadosScreen::Menu, DadosOption::Cores) => SkillContext {
+        (Section::Dados, DadosScreen::Menu, DadosOption::Cores, _) => SkillContext {
             name: "dados.cores",
             description: "Ajuda com cadastro e consulta de cores.",
         },
-        (Section::Dados, DadosScreen::Menu, DadosOption::Vinculos) => SkillContext {
-            name: "dados.vinculos",
-            description: "Ajuda com vinculos entre tecidos e cores.",
+        (Section::Dados, DadosScreen::Menu, DadosOption::Estampas, _) => SkillContext {
+            name: "dados.estampas",
+            description: "Ajuda com cadastro e consulta de estampas.",
         },
-        (Section::Dashboard, _, _) => SkillContext {
+        (Section::Dados, DadosScreen::Menu, DadosOption::Vinculos, _) => SkillContext {
+            name: "dados.vinculos",
+            description: "Ajuda com vinculos entre tecidos e cores ou estampas.",
+        },
+        (Section::Dashboard, _, _, _) => SkillContext {
             name: "dashboard",
             description: "Ajuda a interpretar indicadores gerais da loja.",
         },
-        (Section::Vendas, _, _) => SkillContext {
-            name: "vendas",
-            description: "Ajuda com lancamentos e analise de vendas.",
+        (Section::Vendas, _, _, VendasScreen::Menu) => SkillContext {
+            name: "vendas.menu",
+            description: "Ajuda a iniciar uma nova venda ou consultar o historico de vendas.",
         },
-        (Section::Pedidos, _, _) => SkillContext {
+        (Section::Vendas, _, _, VendasScreen::SelecionarTecido) => SkillContext {
+            name: "vendas.nova.tecido",
+            description: "Ajuda a escolher o tecido da venda; o app decide cor ou estampa pelo tipo do tecido.",
+        },
+        (Section::Vendas, _, _, VendasScreen::SelecionarVinculo) => SkillContext {
+            name: "vendas.nova.vinculo",
+            description: "Ajuda a escolher a cor vinculada para tecido liso ou a estampa vinculada para tecido estampado.",
+        },
+        (Section::Vendas, _, _, VendasScreen::Lancamento) => SkillContext {
+            name: "vendas.nova.lancamento",
+            description: "Ajuda a lancar preco unitario, quantidade vendida e conferir o resumo do pedido.",
+        },
+        (Section::Vendas, _, _, VendasScreen::Historico) => SkillContext {
+            name: "vendas.historico",
+            description: "Ajuda a consultar vendas anteriores quando o historico estiver implementado.",
+        },
+        (Section::Pedidos, _, _, _) => SkillContext {
             name: "pedidos",
             description: "Ajuda com acompanhamento de pedidos.",
         },
-        (Section::Estoque, _, _) => SkillContext {
+        (Section::Estoque, _, _, _) => SkillContext {
             name: "estoque",
             description: "Ajuda com consulta e movimentacao de estoque.",
+        },
+        (Section::Configuracoes, _, _, _) => SkillContext {
+            name: "configuracoes.impressora_recibo",
+            description: "Ajuda a configurar a impressora termica 80mm para recibos de venda com envio direto.",
         },
     }
 }
