@@ -1,0 +1,5 @@
+ALTER TABLE tecidos
+    ADD COLUMN IF NOT EXISTS tipo TEXT NOT NULL DEFAULT 'Selecione',
+    ADD COLUMN IF NOT EXISTS transparencia TEXT NOT NULL DEFAULT 'Selecione',
+    ADD COLUMN IF NOT EXISTS elasticidade TEXT NOT NULL DEFAULT 'Selecione',
+    ADD COLUMN IF NOT EXISTS acabamento TEXT NOT NULL DEFAULT 'Selecione';

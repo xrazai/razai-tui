@@ -1,0 +1,7 @@
+ALTER TABLE cores
+    ADD COLUMN IF NOT EXISTS sku TEXT;
+
+ALTER TABLE cores
+    DROP CONSTRAINT IF EXISTS cores_nome_key;
+
+CREATE UNIQUE INDEX IF NOT EXISTS cores_sku_key ON cores (sku);
