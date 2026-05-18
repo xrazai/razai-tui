@@ -127,13 +127,14 @@ pub(super) fn render_cadastrar_tecido(
     tecidos: &[TecidoRecord],
     editing_tecido_id: Option<i64>,
     pending_delete: bool,
+    dropdown: Option<TecidoField>,
 ) {
     let chunks = Layout::default()
         .direction(Direction::Horizontal)
         .constraints([Constraint::Min(40), Constraint::Length(22)])
         .split(area);
     let calculated = form.calculated_values();
-    let fields = vec![
+    let mut fields = vec![
         format_field(
             TecidoField::Nome,
             form.selected_field,
@@ -155,30 +156,44 @@ pub(super) fn render_cadastrar_tecido(
             &form.largura,
             None,
         ),
-        format_select(
-            TecidoField::Tipo,
-            form.selected_field,
-            "Tipo",
-            form.tipo.value(TIPO_OPTIONS),
-        ),
-        format_select(
-            TecidoField::Transparencia,
-            form.selected_field,
-            "Transparencia",
-            form.transparencia.value(NIVEL_OPTIONS),
-        ),
-        format_select(
-            TecidoField::Elasticidade,
-            form.selected_field,
-            "Elasticidade",
-            form.elasticidade.value(NIVEL_OPTIONS),
-        ),
-        format_select(
-            TecidoField::Acabamento,
-            form.selected_field,
-            "Acabamento",
-            form.acabamento.value(ACABAMENTO_OPTIONS),
-        ),
+    ];
+    push_select(
+        &mut fields,
+        TecidoField::Tipo,
+        form.selected_field,
+        "Tipo",
+        form.tipo.value(TIPO_OPTIONS),
+        TIPO_OPTIONS,
+        dropdown,
+    );
+    push_select(
+        &mut fields,
+        TecidoField::Transparencia,
+        form.selected_field,
+        "Transparencia",
+        form.transparencia.value(NIVEL_OPTIONS),
+        NIVEL_OPTIONS,
+        dropdown,
+    );
+    push_select(
+        &mut fields,
+        TecidoField::Elasticidade,
+        form.selected_field,
+        "Elasticidade",
+        form.elasticidade.value(NIVEL_OPTIONS),
+        NIVEL_OPTIONS,
+        dropdown,
+    );
+    push_select(
+        &mut fields,
+        TecidoField::Acabamento,
+        form.selected_field,
+        "Acabamento",
+        form.acabamento.value(ACABAMENTO_OPTIONS),
+        ACABAMENTO_OPTIONS,
+        dropdown,
+    );
+    fields.extend([
         format_field(
             TecidoField::Rendimento,
             form.selected_field,
@@ -208,7 +223,7 @@ pub(super) fn render_cadastrar_tecido(
         ),
         format_tecido_action(TecidoField::Voltar, form.selected_field, "[Voltar]"),
         format_delete(form.selected_field, editing_tecido_id.is_some()),
-    ];
+    ]);
     let form_widget = Paragraph::new(Text::from(fields))
         .block(
             Block::default()
@@ -270,6 +285,32 @@ pub(super) fn format_select(
         Span::raw(format!("{label}: ")),
         Span::styled(format!("[{value}]"), Style::default().fg(Color::Yellow)),
     ])
+}
+
+fn push_select(
+    lines: &mut Vec<Line<'static>>,
+    field: TecidoField,
+    selected: TecidoField,
+    label: &str,
+    value: &str,
+    options: &'static [&'static str],
+    dropdown: Option<TecidoField>,
+) {
+    lines.push(format_select(field, selected, label, value));
+    if dropdown != Some(field) {
+        return;
+    }
+
+    for option in options {
+        let is_current = *option == value;
+        lines.push(Line::from(vec![
+            Span::styled(
+                if is_current { "  > " } else { "    " },
+                selected_style(is_current),
+            ),
+            Span::styled(format!("[{option}]"), Style::default().fg(Color::Yellow)),
+        ]));
+    }
 }
 
 pub(super) fn format_cor_field(

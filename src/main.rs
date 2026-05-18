@@ -23,6 +23,7 @@ fn main() -> io::Result<()> {
     if let Some(pool) = &pool {
         let _ = db_runtime.block_on(db::ensure_configuracoes_table(pool));
         let _ = db_runtime.block_on(db::ensure_estampas_tables(pool));
+        let _ = db_runtime.block_on(db::ensure_vendas_tables(pool));
     }
     let tecidos = match &pool {
         Some(pool) => db_runtime
@@ -49,10 +50,24 @@ fn main() -> io::Result<()> {
             .flatten(),
         None => None,
     };
+    let vendas_historico = match &pool {
+        Some(pool) => db_runtime
+            .block_on(db::list_vendas(pool))
+            .unwrap_or_default(),
+        None => Vec::new(),
+    };
 
     let mut terminal = setup_terminal()?;
-    let app_result =
-        App::new(pool, tecidos, cores, estampas, selected_printer, db_runtime).run(&mut terminal);
+    let app_result = App::new(
+        pool,
+        tecidos,
+        cores,
+        estampas,
+        selected_printer,
+        vendas_historico,
+        db_runtime,
+    )
+    .run(&mut terminal);
     restore_terminal(&mut terminal)?;
     app_result
 }

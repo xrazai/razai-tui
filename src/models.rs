@@ -3,52 +3,8 @@ pub use sku::{build_estampa_vinculo_sku, build_vinculo_sku};
 
 use crate::db::{CorRecord, EstampaRecord, TecidoRecord};
 
-#[derive(Clone, Copy, Default, Eq, PartialEq)]
-pub enum Focus {
-    #[default]
-    System,
-    Chat,
-}
-
-impl Focus {
-    pub fn toggle(self) -> Self {
-        match self {
-            Focus::System => Focus::Chat,
-            Focus::Chat => Focus::System,
-        }
-    }
-
-    pub fn title(self) -> &'static str {
-        match self {
-            Focus::System => "Sistema",
-            Focus::Chat => "Chat",
-        }
-    }
-}
-
-#[derive(Default)]
-pub struct ChatState {
-    pub input: String,
-    pub messages: Vec<ChatMessage>,
-}
-
-pub struct ChatMessage {
-    pub author: &'static str,
-    pub text: String,
-}
-
-impl ChatMessage {
-    pub fn user(text: String) -> Self {
-        Self {
-            author: "Voce",
-            text,
-        }
-    }
-
-    pub fn assistant(text: String) -> Self {
-        Self { author: "IA", text }
-    }
-}
+mod core;
+pub use core::{ChatMessage, ChatState, Focus};
 
 #[derive(Clone, Copy, Default, Eq, PartialEq)]
 pub enum VendasScreen {
@@ -63,16 +19,24 @@ pub enum VendasScreen {
 #[derive(Clone, Copy, Default, Eq, PartialEq)]
 pub enum VendaField {
     #[default]
+    Tecido,
+    Vinculo,
     Preco,
     Quantidade,
-    Confirmar,
+    Finalizar,
+    Cancelar,
+    Excluir,
 }
 
 impl VendaField {
-    const ALL: [VendaField; 3] = [
+    const ALL: [VendaField; 7] = [
+        VendaField::Tecido,
+        VendaField::Vinculo,
         VendaField::Preco,
         VendaField::Quantidade,
-        VendaField::Confirmar,
+        VendaField::Finalizar,
+        VendaField::Cancelar,
+        VendaField::Excluir,
     ];
 
     pub fn next(self) -> Self {
@@ -92,10 +56,29 @@ impl VendaField {
 }
 
 pub struct VendaItem {
-    pub vinculo_sku: String,
     pub descricao: String,
     pub quantidade: f64,
     pub preco_unitario: f64,
+}
+
+#[derive(Clone, Copy, Default, Eq, PartialEq)]
+pub enum FinalizarVendaOption {
+    #[default]
+    Finalizar,
+    FinalizarEImprimir,
+}
+
+impl FinalizarVendaOption {
+    pub fn next(self) -> Self {
+        match self {
+            Self::Finalizar => Self::FinalizarEImprimir,
+            Self::FinalizarEImprimir => Self::Finalizar,
+        }
+    }
+
+    pub fn previous(self) -> Self {
+        self.next()
+    }
 }
 
 impl VendaItem {
@@ -458,6 +441,16 @@ impl TecidoField {
             .iter()
             .position(|field| *field == self)
             .unwrap_or(0)
+    }
+
+    pub fn is_select(self) -> bool {
+        matches!(
+            self,
+            TecidoField::Tipo
+                | TecidoField::Transparencia
+                | TecidoField::Elasticidade
+                | TecidoField::Acabamento
+        )
     }
 
     fn is_editable(self) -> bool {

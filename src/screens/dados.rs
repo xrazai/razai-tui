@@ -26,6 +26,7 @@ pub fn render(frame: &mut Frame, area: Rect, app: &App) {
             &app.tecidos,
             app.editing_tecido_id,
             app.pending_delete,
+            app.tecido_select_dropdown,
         ),
         DadosScreen::Cores => render_cores(frame, area, app.cor_option, &app.cores),
         DadosScreen::CadastrarCor => forms::render_cadastrar_cor(

@@ -91,11 +91,11 @@ pub fn active_skill(
         },
         (Section::Vendas, _, _, VendasScreen::Lancamento) => SkillContext {
             name: "vendas.nova.lancamento",
-            description: "Ajuda a lancar preco unitario, quantidade vendida e conferir o resumo do pedido.",
+            description: "Ajuda a lancar ou editar itens da venda, salvar, imprimir recibo ou excluir venda em edicao.",
         },
         (Section::Vendas, _, _, VendasScreen::Historico) => SkillContext {
             name: "vendas.historico",
-            description: "Ajuda a consultar vendas anteriores quando o historico estiver implementado.",
+            description: "Ajuda a consultar vendas anteriores e abrir uma venda para editar ou excluir.",
         },
         (Section::Pedidos, _, _, _) => SkillContext {
             name: "pedidos",

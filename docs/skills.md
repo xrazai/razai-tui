@@ -38,8 +38,8 @@ Cada tela ativa uma skill para orientar o chat lateral. O codigo fica em `src/ag
 | Menu de vendas | `vendas.menu` | Iniciar nova venda ou acessar historico. |
 | Nova venda: selecionar tecido | `vendas.nova.tecido` | Escolher tecido; o app decide cor ou estampa pelo tipo. |
 | Nova venda: selecionar vinculo | `vendas.nova.vinculo` | Escolher cor vinculada ou estampa vinculada. |
-| Nova venda: lancamento | `vendas.nova.lancamento` | Informar preco unitario, quantidade e conferir resumo. |
-| Historico | `vendas.historico` | Consultar vendas anteriores quando implementado. |
+| Nova venda/edicao: lancamento | `vendas.nova.lancamento` | Informar preco unitario, quantidade, conferir resumo, salvar, imprimir ou excluir em edicao. |
+| Historico | `vendas.historico` | Consultar vendas anteriores e abrir uma venda para editar ou excluir. |
 
 ## Regras de atualizacao
 

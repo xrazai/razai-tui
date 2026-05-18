@@ -18,7 +18,8 @@ O projeto e uma TUI em Rust com `ratatui`, banco local PostgreSQL e chat lateral
 | `src/screens/configuracoes.rs` | Renderizacao da selecao de impressora. |
 | `src/models.rs` | Enums, formularios e regras de calculo. |
 | `src/models/sku.rs` | Geracao de SKUs. |
-| `src/db.rs` | Queries e comandos PostgreSQL. |
+| `src/db.rs` | Queries e comandos PostgreSQL gerais. |
+| `src/db/sales.rs` | Persistencia de vendas, itens e historico. |
 | `src/agent.rs` | Skills do agente e chamada OpenRouter. |
 
 ## Limite de tamanho
@@ -48,6 +49,8 @@ Chaves atuais:
 
 - `receipt_printer`: impressora selecionada para recibos de venda.
 
-## Impressao
+## Vendas e impressao
 
-A aba `Configuracoes` lista impressoras instaladas no Windows com `Get-Printer`. A impressora selecionada e salva no banco. O envio direto de recibo 80mm sera implementado no fechamento do fluxo de venda/recibo.
+A aba `Configuracoes` lista impressoras instaladas no Windows com `Get-Printer`. A impressora selecionada e salva no banco.
+
+Vendas finalizadas sao persistidas em `vendas` e `venda_itens`. O historico permite abrir uma venda para editar seus itens, salvar novamente ou excluir com confirmacao. O envio de recibo 80mm usa impressao RAW/ESC-POS direto para a impressora configurada, sem abrir janela de impressao.

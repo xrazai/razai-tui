@@ -46,7 +46,7 @@ OPENROUTER_MODEL=anthropic/claude-sonnet-4.5
 ## Abas
 
 - `Dashboard`: tela de indicadores gerais, ainda sem conteudo.
-- `Vendas`: nova venda e historico.
+- `Vendas`: nova venda, historico, edicao e exclusao.
 - `Pedidos`: reservado para acompanhamento de pedidos.
 - `Dados`: cadastros e vinculos.
 - `Estoque`: reservado para estoque.
@@ -77,6 +77,9 @@ O fluxo de nova venda e:
 3. Selecionar o vinculo.
 4. Informar preco unitario e quantidade.
 5. Conferir o resumo do pedido.
+6. Finalizar, ou finalizar e imprimir recibo direto na impressora configurada.
+
+No `Historico de Vendas`, `Enter` abre a venda selecionada para edicao. A tela de edicao permite salvar alteracoes, salvar e imprimir, cancelar ou excluir com confirmacao.
 
 ## Agente IA
 

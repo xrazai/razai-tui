@@ -6,6 +6,8 @@ use crate::{
     models::*,
 };
 
+mod navigation;
+
 impl App {
     pub(super) fn handle_tecido_form_key(&mut self, key: KeyCode) {
         if self.pending_delete {
@@ -19,13 +21,21 @@ impl App {
             return;
         }
 
+        if self.tecido_select_dropdown.is_some() {
+            match key {
+                KeyCode::Esc | KeyCode::Enter => self.tecido_select_dropdown = None,
+                KeyCode::Up => self.tecido_form.previous_select_option(),
+                KeyCode::Down => self.tecido_form.next_select_option(),
+                _ => {}
+            }
+            return;
+        }
+
         match key {
             KeyCode::Esc => self.voltar_dados(),
             KeyCode::Backspace => self.tecido_form.backspace(),
             KeyCode::Up => self.tecido_form.previous_field(),
             KeyCode::Down => self.tecido_form.next_field(),
-            KeyCode::Left => self.tecido_form.previous_select_option(),
-            KeyCode::Right => self.tecido_form.next_select_option(),
             KeyCode::Enter if self.tecido_form.selected_field == TecidoField::Salvar => {
                 self.cadastrar_tecido();
             }
@@ -34,6 +44,9 @@ impl App {
             }
             KeyCode::Enter if self.tecido_form.selected_field == TecidoField::Voltar => {
                 self.voltar_dados();
+            }
+            KeyCode::Enter if self.tecido_form.selected_field.is_select() => {
+                self.tecido_select_dropdown = Some(self.tecido_form.selected_field);
             }
             KeyCode::Enter => self.tecido_form.next_field(),
             KeyCode::Char(character) => self.tecido_form.push(character),
@@ -110,101 +123,11 @@ impl App {
             _ => {}
         }
     }
-
-    pub(super) fn next_tecido(&mut self) {
-        self.tecido_option = (self.tecido_option + 1) % self.tecidos_menu_len();
-    }
-
-    pub(super) fn previous_tecido(&mut self) {
-        self.tecido_option =
-            (self.tecido_option + self.tecidos_menu_len() - 1) % self.tecidos_menu_len();
-    }
-
-    pub(super) fn tecidos_menu_len(&self) -> usize {
-        self.tecidos.len() + 1
-    }
-
-    pub(super) fn next_cor(&mut self) {
-        self.cor_option = (self.cor_option + 1) % self.cor_menu_len();
-    }
-
-    pub(super) fn previous_cor(&mut self) {
-        let len = self.cor_menu_len();
-        self.cor_option = (self.cor_option + len - 1) % len;
-    }
-
-    pub(super) fn cor_menu_len(&self) -> usize {
-        match self.dados_screen {
-            DadosScreen::Estampas => self.estampas.len() + 1,
-            _ => self.cores.len() + 1,
-        }
-    }
-
-    pub(super) fn next_vinculo_menu(&mut self) {
-        self.vinculo_menu_option = (self.vinculo_menu_option + 1) % 2;
-    }
-
-    pub(super) fn previous_vinculo_menu(&mut self) {
-        self.vinculo_menu_option = (self.vinculo_menu_option + 1) % 2;
-    }
-
-    pub(super) fn next_vinculo_tecido(&mut self) {
-        if !self.tecidos.is_empty() {
-            self.vinculo_tecido_option = (self.vinculo_tecido_option + 1) % self.tecidos.len();
-        }
-    }
-
-    pub(super) fn previous_vinculo_tecido(&mut self) {
-        if !self.tecidos.is_empty() {
-            self.vinculo_tecido_option =
-                (self.vinculo_tecido_option + self.tecidos.len() - 1) % self.tecidos.len();
-        }
-    }
-
-    pub(super) fn vinculo_criar_len(&self) -> usize {
-        self.vinculo_item_len() + 2
-    }
-
-    pub(super) fn vinculo_item_len(&self) -> usize {
-        if self.selected_vinculo_usa_estampas() {
-            self.estampas.len()
-        } else {
-            self.cores.len()
-        }
-    }
-
-    pub(super) fn selected_vinculo_usa_estampas(&self) -> bool {
-        self.selected_vinculo_tecido()
-            .map(|tecido| tecido.tipo == "Estampado")
-            .unwrap_or(false)
-    }
-
-    pub(super) fn next_vinculo_criar_option(&mut self) {
-        self.vinculo_criar_option = (self.vinculo_criar_option + 1) % self.vinculo_criar_len();
-    }
-
-    pub(super) fn previous_vinculo_criar_option(&mut self) {
-        self.vinculo_criar_option =
-            (self.vinculo_criar_option + self.vinculo_criar_len() - 1) % self.vinculo_criar_len();
-    }
-
-    pub(super) fn next_vinculo_lista(&mut self) {
-        if !self.vinculos.is_empty() {
-            self.vinculo_lista_option = (self.vinculo_lista_option + 1) % self.vinculos.len();
-        }
-    }
-
-    pub(super) fn previous_vinculo_lista(&mut self) {
-        if !self.vinculos.is_empty() {
-            self.vinculo_lista_option =
-                (self.vinculo_lista_option + self.vinculos.len() - 1) % self.vinculos.len();
-        }
-    }
-
     pub(super) fn voltar_dados(&mut self) {
         match self.dados_screen {
             DadosScreen::CadastrarTecido => {
                 self.tecido_form = TecidoForm::default();
+                self.tecido_select_dropdown = None;
                 self.editing_tecido_id = None;
                 self.pending_delete = false;
                 self.dados_screen = DadosScreen::Tecidos;
@@ -273,6 +196,7 @@ impl App {
         self.reload_tecidos();
         self.db_status = String::from("Tecido salvo no banco local");
         self.tecido_form = TecidoForm::default();
+        self.tecido_select_dropdown = None;
         self.editing_tecido_id = None;
         self.pending_delete = false;
         self.tecido_option = self
@@ -286,6 +210,7 @@ impl App {
 
     pub(super) fn open_new_tecido(&mut self) {
         self.tecido_form = TecidoForm::default();
+        self.tecido_select_dropdown = None;
         self.editing_tecido_id = None;
         self.pending_delete = false;
         self.dados_screen = DadosScreen::CadastrarTecido;
@@ -296,6 +221,7 @@ impl App {
             return;
         };
         self.tecido_form = TecidoForm::from_record(tecido);
+        self.tecido_select_dropdown = None;
         self.editing_tecido_id = Some(tecido.id);
         self.pending_delete = false;
         self.dados_screen = DadosScreen::CadastrarTecido;
@@ -318,6 +244,7 @@ impl App {
         self.reload_tecidos();
         self.db_status = String::from("Tecido excluido do banco local");
         self.tecido_form = TecidoForm::default();
+        self.tecido_select_dropdown = None;
         self.editing_tecido_id = None;
         self.pending_delete = false;
         self.tecido_option = 0;

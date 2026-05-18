@@ -1,5 +1,8 @@
 use sqlx::{PgPool, Row, postgres::PgPoolOptions};
 
+mod sales;
+pub use sales::*;
+
 use crate::models::{
     ACABAMENTO_OPTIONS, NIVEL_OPTIONS, TIPO_OPTIONS, TecidoForm, parse_largura_m,
     round_to_nearest_ten,
@@ -70,6 +73,44 @@ pub async fn ensure_estampas_tables(pool: &PgPool) -> Result<(), sqlx::Error> {
     )
     .execute(pool)
     .await?;
+
+    Ok(())
+}
+
+pub async fn ensure_vendas_tables(pool: &PgPool) -> Result<(), sqlx::Error> {
+    sqlx::query(
+        r#"
+        CREATE TABLE IF NOT EXISTS vendas (
+            id BIGSERIAL PRIMARY KEY,
+            total NUMERIC(12, 2) NOT NULL,
+            created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+        )
+        "#,
+    )
+    .execute(pool)
+    .await?;
+
+    sqlx::query(
+        r#"
+        CREATE TABLE IF NOT EXISTS venda_itens (
+            id BIGSERIAL PRIMARY KEY,
+            venda_id BIGINT NOT NULL REFERENCES vendas(id) ON DELETE CASCADE,
+            descricao TEXT NOT NULL,
+            quantidade NUMERIC(12, 3) NOT NULL,
+            preco_unitario NUMERIC(12, 2) NOT NULL,
+            subtotal NUMERIC(12, 2) NOT NULL
+        )
+        "#,
+    )
+    .execute(pool)
+    .await?;
+
+    sqlx::query("CREATE INDEX IF NOT EXISTS idx_venda_itens_venda_id ON venda_itens(venda_id)")
+        .execute(pool)
+        .await?;
+    sqlx::query("CREATE INDEX IF NOT EXISTS idx_vendas_created_at ON vendas(created_at DESC)")
+        .execute(pool)
+        .await?;
 
     Ok(())
 }
@@ -445,48 +486,6 @@ pub async fn list_estampa_vinculos_by_tecido(
         "#,
     )
     .bind(tecido_id)
-    .fetch_all(pool)
-    .await?;
-
-    Ok(rows
-        .into_iter()
-        .map(|row| VinculoRecord {
-            cor_id: row.get("cor_id"),
-            tecido_nome: row.get("tecido_nome"),
-            cor_nome: row.get("cor_nome"),
-            cor_hex: row.get("cor_hex"),
-            sku: row.get("sku"),
-        })
-        .collect())
-}
-
-pub async fn list_vinculos_by_tecido_and_tipo(
-    pool: &PgPool,
-    tecido_id: i64,
-    tipo: &str,
-) -> Result<Vec<VinculoRecord>, sqlx::Error> {
-    if tipo == "Estampado" {
-        return list_estampa_vinculos_by_tecido(pool, tecido_id).await;
-    }
-
-    let rows = sqlx::query(
-        r#"
-        SELECT
-            tc.cor_id,
-            t.nome AS tecido_nome,
-            c.nome AS cor_nome,
-            c.codigo_hex AS cor_hex,
-            tc.sku
-        FROM tecido_cores tc
-        JOIN tecidos t ON t.id = tc.tecido_id
-        JOIN cores c ON c.id = tc.cor_id
-        WHERE tc.tecido_id = $1
-          AND t.tipo = $2
-        ORDER BY c.nome, c.id
-        "#,
-    )
-    .bind(tecido_id)
-    .bind(tipo)
     .fetch_all(pool)
     .await?;
 
