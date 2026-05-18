@@ -50,8 +50,6 @@ impl App {
             }
             KeyCode::Enter => self.tecido_form.next_field(),
             KeyCode::Char(character) => self.tecido_form.push(character),
-            KeyCode::BackTab => self.section = self.section.previous(),
-            KeyCode::Tab => self.section = self.section.next(),
             _ => {}
         }
     }
@@ -84,8 +82,6 @@ impl App {
                 }
             }
             KeyCode::Char(character) => self.cor_form.push(character),
-            KeyCode::Tab => self.section = self.section.next(),
-            KeyCode::BackTab => self.section = self.section.previous(),
             _ => {}
         }
     }
@@ -118,8 +114,6 @@ impl App {
                 }
             }
             KeyCode::Char(character) => self.estampa_form.push(character),
-            KeyCode::Tab => self.section = self.section.next(),
-            KeyCode::BackTab => self.section = self.section.previous(),
             _ => {}
         }
     }

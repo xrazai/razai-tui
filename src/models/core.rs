@@ -6,11 +6,15 @@ pub enum Focus {
 }
 
 impl Focus {
-    pub fn toggle(self) -> Self {
+    pub fn next(self) -> Self {
         match self {
             Focus::System => Focus::Chat,
             Focus::Chat => Focus::System,
         }
+    }
+
+    pub fn previous(self) -> Self {
+        self.next()
     }
 
     pub fn title(self) -> &'static str {
@@ -30,6 +34,37 @@ pub struct ChatState {
 pub struct ChatMessage {
     pub author: &'static str,
     pub text: String,
+}
+
+#[derive(Clone)]
+pub enum AgentAction {
+    CreateTecido {
+        nome: String,
+        composicao: String,
+        largura: String,
+        tipo: Option<String>,
+    },
+    CreateCor {
+        nome: String,
+        hex: String,
+    },
+    CreateEstampa {
+        nome: String,
+    },
+    CreateVinculo {
+        tecido: String,
+        item: String,
+    },
+    OpenVenda {
+        id: i64,
+    },
+    FilterSalesHistory {
+        inicio: String,
+        fim: String,
+    },
+    SelectPrinter {
+        printer: String,
+    },
 }
 
 impl ChatMessage {

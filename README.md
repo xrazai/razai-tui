@@ -36,8 +36,8 @@ OPENROUTER_MODEL=anthropic/claude-sonnet-4.5
 
 - `Ctrl+C`: sair
 - `Esc`: voltar/cancelar
-- `F2`: alternar foco entre sistema e chat
-- `Tab`/`Shift+Tab` ou `Esq`/`Dir`: navegar entre abas
+- `Tab`/`Shift+Tab`: alternar foco entre sistema, resumo quando visivel, e chat
+- `Esq`/`Dir`: navegar entre abas
 - `Cima`/`Baixo`: navegar em listas e campos
 - `Enter`: abrir, avancar ou confirmar acao selecionada
 - `Space`: marcar/desmarcar itens em vinculos e marcar impressora
@@ -45,7 +45,7 @@ OPENROUTER_MODEL=anthropic/claude-sonnet-4.5
 
 ## Abas
 
-- `Dashboard`: tela de indicadores gerais, ainda sem conteudo.
+- `Dashboard`: agente mestre para consultas e acoes com confirmacao.
 - `Vendas`: nova venda, historico, edicao e exclusao.
 - `Pedidos`: reservado para acompanhamento de pedidos.
 - `Dados`: cadastros e vinculos.
@@ -79,11 +79,13 @@ O fluxo de nova venda e:
 5. Conferir o resumo do pedido.
 6. Finalizar, ou finalizar e imprimir recibo direto na impressora configurada.
 
-No `Historico de Vendas`, `Enter` abre a venda selecionada para edicao. A tela de edicao permite salvar alteracoes, salvar e imprimir, cancelar ou excluir com confirmacao.
+O `Resumo do pedido` aparece apenas na tela de lancamento, inclusive quando uma venda do historico esta aberta para edicao. Use `Tab` para focar o resumo, `Cima/Baixo` para selecionar um lancamento, `Enter` para editar e `Delete` para excluir com confirmacao.
+
+No `Historico de Vendas`, o periodo padrao e o dia atual. Ajuste `Data inicio` e `Data fim` no formato `AAAA-MM-DD` e pressione `Enter` para recarregar. Na lista, `Enter` abre a venda selecionada para edicao. A tela de edicao permite salvar alteracoes, salvar e imprimir, cancelar ou excluir com confirmacao.
 
 ## Agente IA
 
-O chat lateral usa OpenRouter quando `OPENROUTER_API_KEY` esta configurada. Cada tela expõe uma skill ativa para orientar o agente. A matriz de skills fica em [docs/skills.md](docs/skills.md).
+O chat lateral usa OpenRouter quando `OPENROUTER_API_KEY` esta configurada. Cada tela expõe uma skill ativa para orientar o agente. No Dashboard, a skill `dashboard.master` consulta dados locais e prepara cadastros, vinculos, vendas, historico e configuracoes com confirmacao antes de gravar. Responda `sim` para confirmar uma acao pendente ou `nao` para cancelar. A matriz de skills fica em [docs/skills.md](docs/skills.md).
 
 ## Arquitetura
 
@@ -94,5 +96,5 @@ A organizacao atual evita arquivos grandes quando for possivel dividir:
 - `src/app/`: handlers por dominio.
 - `src/screens/`: renderizacao de telas.
 - `src/models.rs` e `src/models/`: estado de formularios, enums e regras de SKU.
-- `src/db.rs`: acesso ao Postgres.
+- `src/db.rs` e `src/db/`: acesso ao Postgres.
 - `src/agent.rs`: skills e chamada OpenRouter.

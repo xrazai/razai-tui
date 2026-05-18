@@ -6,6 +6,8 @@ use ratatui::{
 
 use crate::models::parse_hex_color;
 
+pub const SIDE_PANEL_WIDTH: u16 = 48;
+
 pub fn selected_style(selected: bool) -> Style {
     if selected {
         Style::default()

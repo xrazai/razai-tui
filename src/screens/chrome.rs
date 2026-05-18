@@ -76,7 +76,7 @@ pub fn render_chat(
     frame.render_widget(skill_panel, chunks[0]);
 
     let history = if chat.messages.is_empty() {
-        String::from("F2 foca o chat. Enter envia.")
+        String::from("Tab foca o chat. Enter envia.")
     } else {
         chat.messages
             .iter()
@@ -110,7 +110,7 @@ pub fn render_chat(
 
 pub fn render_footer(frame: &mut Frame, area: Rect, db_status: &str, focus: Focus) {
     let footer = Paragraph::new(format!(
-        "Foco: {} | F2 chat | Cima/Baixo selecionar | Space marcar/desmarcar | Enter abrir/confirmar | Backspace apagar | Esc voltar/cancelar | Ctrl+C sair | {db_status}",
+        "Foco: {} | Tab alternar foco | Esq/Dir abas | Cima/Baixo selecionar | Space marcar/desmarcar | Enter abrir/confirmar | Backspace apagar | Esc voltar/cancelar | Ctrl+C sair | {db_status}",
         focus.title(),
     ))
     .style(Style::default().fg(Color::DarkGray))

@@ -2006,6 +2006,7 @@ dependencies = [
 name = "razai-tui"
 version = "0.1.0"
 dependencies = [
+ "chrono",
  "crossterm",
  "dotenvy",
  "ratatui",

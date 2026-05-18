@@ -1,3 +1,4 @@
+use chrono::{Local, NaiveDate};
 use sqlx::{PgPool, Row};
 
 use crate::models::VendaItem;
@@ -8,6 +9,18 @@ pub struct VendaHistoricoRecord {
     pub created_at: String,
     pub total: f64,
     pub itens: i64,
+}
+
+pub fn today_sales_date() -> NaiveDate {
+    Local::now().date_naive()
+}
+
+pub fn format_sales_date(date: NaiveDate) -> String {
+    date.format("%Y-%m-%d").to_string()
+}
+
+pub fn parse_sales_date(value: &str) -> Option<NaiveDate> {
+    NaiveDate::parse_from_str(value, "%Y-%m-%d").ok()
 }
 
 pub async fn insert_venda(pool: &PgPool, itens: &[VendaItem]) -> Result<i64, sqlx::Error> {
@@ -26,6 +39,15 @@ pub async fn insert_venda(pool: &PgPool, itens: &[VendaItem]) -> Result<i64, sql
 }
 
 pub async fn list_vendas(pool: &PgPool) -> Result<Vec<VendaHistoricoRecord>, sqlx::Error> {
+    let today = today_sales_date();
+    list_vendas_periodo(pool, today, today).await
+}
+
+pub async fn list_vendas_periodo(
+    pool: &PgPool,
+    inicio: NaiveDate,
+    fim: NaiveDate,
+) -> Result<Vec<VendaHistoricoRecord>, sqlx::Error> {
     let rows = sqlx::query(
         r#"
         SELECT
@@ -35,11 +57,14 @@ pub async fn list_vendas(pool: &PgPool) -> Result<Vec<VendaHistoricoRecord>, sql
             COUNT(vi.id)::bigint AS itens
         FROM vendas v
         LEFT JOIN venda_itens vi ON vi.venda_id = v.id
+        WHERE (v.created_at AT TIME ZONE 'America/Sao_Paulo')::date BETWEEN $1 AND $2
         GROUP BY v.id, v.created_at, v.total
         ORDER BY v.created_at DESC, v.id DESC
         LIMIT 100
         "#,
     )
+    .bind(inicio)
+    .bind(fim)
     .fetch_all(pool)
     .await?;
 

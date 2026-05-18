@@ -16,8 +16,8 @@ impl App {
                 }
             }
             KeyCode::Enter => self.select_printer(),
-            KeyCode::Left | KeyCode::BackTab => self.section = self.section.previous(),
-            KeyCode::Right | KeyCode::Tab => self.section = self.section.next(),
+            KeyCode::Left => self.section = self.section.previous(),
+            KeyCode::Right => self.section = self.section.next(),
             KeyCode::Esc => self.section = Section::Dashboard,
             _ => {}
         }

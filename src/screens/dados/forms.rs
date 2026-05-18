@@ -9,7 +9,7 @@ use ratatui::{
 use crate::{
     db::{CorRecord, EstampaRecord, TecidoRecord},
     models::*,
-    ui::{centered_rect, color_swatch, selected_style},
+    ui::{SIDE_PANEL_WIDTH, centered_rect, color_swatch, selected_style},
 };
 
 pub(super) fn render_cadastrar_cor(
@@ -49,7 +49,7 @@ pub(super) fn render_cadastrar_cor(
     );
     let chunks = Layout::default()
         .direction(Direction::Horizontal)
-        .constraints([Constraint::Min(40), Constraint::Length(22)])
+        .constraints([Constraint::Min(40), Constraint::Length(SIDE_PANEL_WIDTH)])
         .split(area);
     let sku = Paragraph::new(form.sku(cores, editing_id))
         .block(Block::default().title("SKU").borders(Borders::ALL))
@@ -105,7 +105,7 @@ pub(super) fn render_cadastrar_estampa(
     );
     let chunks = Layout::default()
         .direction(Direction::Horizontal)
-        .constraints([Constraint::Min(40), Constraint::Length(22)])
+        .constraints([Constraint::Min(40), Constraint::Length(SIDE_PANEL_WIDTH)])
         .split(area);
     let sku = Paragraph::new(form.sku(estampas, editing_id))
         .block(Block::default().title("SKU").borders(Borders::ALL))
@@ -131,7 +131,7 @@ pub(super) fn render_cadastrar_tecido(
 ) {
     let chunks = Layout::default()
         .direction(Direction::Horizontal)
-        .constraints([Constraint::Min(40), Constraint::Length(22)])
+        .constraints([Constraint::Min(40), Constraint::Length(SIDE_PANEL_WIDTH)])
         .split(area);
     let calculated = form.calculated_values();
     let mut fields = vec![

@@ -11,11 +11,13 @@ use tokio::runtime::Runtime;
 
 use crate::{
     agent,
-    db::{CorRecord, EstampaRecord, TecidoRecord, VendaHistoricoRecord, VinculoRecord},
+    db::{self, CorRecord, EstampaRecord, TecidoRecord, VendaHistoricoRecord, VinculoRecord},
     models::*,
     screens,
+    ui::SIDE_PANEL_WIDTH,
 };
 
+mod agent_actions;
 mod configuracoes;
 mod dados;
 mod vendas;
@@ -50,6 +52,7 @@ pub struct App {
     pub db_status: String,
     pub focus: Focus,
     pub chat: ChatState,
+    pub pending_agent_action: Option<AgentAction>,
     pub vendas_screen: VendasScreen,
     pub venda_menu_option: usize,
     pub venda_tecido_option: usize,
@@ -60,12 +63,20 @@ pub struct App {
     pub venda_quantidade: String,
     pub venda_vinculos: Vec<VinculoRecord>,
     pub venda_itens: Vec<VendaItem>,
+    pub venda_resumo_focus: bool,
+    pub venda_item_option: usize,
+    pub editing_venda_item: Option<usize>,
+    pub editing_venda_item_descricao: Option<String>,
     pub vendas_historico: Vec<VendaHistoricoRecord>,
     pub venda_historico_option: usize,
+    pub venda_historico_field: usize,
+    pub venda_historico_inicio: String,
+    pub venda_historico_fim: String,
     pub editing_venda_id: Option<i64>,
     pub finalizar_venda_dialog: bool,
     pub finalizar_venda_option: FinalizarVendaOption,
     pub pending_delete_venda: bool,
+    pub pending_delete_venda_item: bool,
     pub printers: Vec<String>,
     pub printer_option: usize,
     pub selected_printer: Option<String>,
@@ -88,6 +99,7 @@ impl App {
             .as_ref()
             .and_then(|selected| printers.iter().position(|printer| printer == selected))
             .unwrap_or(0);
+        let today = db::format_sales_date(db::today_sales_date());
 
         Self {
             section: Section::default(),
@@ -121,6 +133,7 @@ impl App {
             db_runtime,
             focus: Focus::System,
             chat: ChatState::default(),
+            pending_agent_action: None,
             vendas_screen: VendasScreen::default(),
             venda_menu_option: 0,
             venda_tecido_option: 0,
@@ -131,12 +144,20 @@ impl App {
             venda_quantidade: String::new(),
             venda_vinculos: Vec::new(),
             venda_itens: Vec::new(),
+            venda_resumo_focus: false,
+            venda_item_option: 0,
+            editing_venda_item: None,
+            editing_venda_item_descricao: None,
             vendas_historico,
             venda_historico_option: 0,
+            venda_historico_field: 2,
+            venda_historico_inicio: today.clone(),
+            venda_historico_fim: today,
             editing_venda_id: None,
             finalizar_venda_dialog: false,
             finalizar_venda_option: FinalizarVendaOption::default(),
             pending_delete_venda: false,
+            pending_delete_venda_item: false,
             printers,
             printer_option,
             selected_printer,
@@ -177,8 +198,8 @@ impl App {
             return;
         }
 
-        if key.code == KeyCode::F(2) {
-            self.focus = self.focus.toggle();
+        if matches!(key.code, KeyCode::Tab | KeyCode::BackTab) {
+            self.handle_focus_tab(key.code);
             return;
         }
 
@@ -302,8 +323,8 @@ impl App {
             KeyCode::Char(' ') if self.dados_screen == DadosScreen::VinculosSelecionarCores => {
                 self.toggle_vinculo_cor();
             }
-            KeyCode::Left | KeyCode::BackTab => self.section = self.section.previous(),
-            KeyCode::Right | KeyCode::Tab => self.section = self.section.next(),
+            KeyCode::Left => self.section = self.section.previous(),
+            KeyCode::Right => self.section = self.section.next(),
             _ => {}
         }
     }
@@ -320,6 +341,39 @@ impl App {
         }
     }
 
+    fn handle_focus_tab(&mut self, key: KeyCode) {
+        if self.focus == Focus::Chat {
+            self.focus = match key {
+                KeyCode::BackTab => self.focus.previous(),
+                _ => self.focus.next(),
+            };
+            return;
+        }
+
+        if self.section == Section::Vendas && self.vendas_screen == VendasScreen::Lancamento {
+            if key == KeyCode::BackTab {
+                if self.venda_resumo_focus {
+                    self.venda_resumo_focus = false;
+                } else {
+                    self.focus = Focus::Chat;
+                }
+            } else if self.venda_resumo_focus {
+                self.focus = Focus::Chat;
+                self.venda_resumo_focus = false;
+            } else if self.venda_itens.is_empty() {
+                self.focus = Focus::Chat;
+            } else {
+                self.venda_resumo_focus = true;
+            }
+            return;
+        }
+
+        self.focus = match key {
+            KeyCode::BackTab => self.focus.previous(),
+            _ => self.focus.next(),
+        };
+    }
+
     fn submit_chat(&mut self) {
         let message = self.chat.input.trim().to_string();
         if message.is_empty() {
@@ -328,6 +382,16 @@ impl App {
 
         self.chat.messages.push(ChatMessage::user(message.clone()));
         self.chat.input.clear();
+
+        if self.handle_pending_agent_confirmation(&message) {
+            return;
+        }
+
+        if self.section == Section::Dashboard {
+            let reply = self.submit_dashboard_agent_message(&message);
+            self.chat.messages.push(ChatMessage::assistant(reply));
+            return;
+        }
 
         let skill = self.active_skill();
         let reply = self
@@ -359,7 +423,7 @@ impl App {
 
         let body = Layout::default()
             .direction(Direction::Horizontal)
-            .constraints([Constraint::Min(50), Constraint::Length(38)])
+            .constraints([Constraint::Min(50), Constraint::Length(SIDE_PANEL_WIDTH)])
             .split(outer[2]);
 
         match self.section {

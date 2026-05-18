@@ -74,8 +74,8 @@ pub fn active_skill(
             description: "Ajuda com vinculos entre tecidos e cores ou estampas.",
         },
         (Section::Dashboard, _, _, _) => SkillContext {
-            name: "dashboard",
-            description: "Ajuda a interpretar indicadores gerais da loja.",
+            name: "dashboard.master",
+            description: "Agente mestre: consulta dados locais e prepara cadastros, vinculos, vendas, historico e configuracoes com confirmacao.",
         },
         (Section::Vendas, _, _, VendasScreen::Menu) => SkillContext {
             name: "vendas.menu",
@@ -95,7 +95,7 @@ pub fn active_skill(
         },
         (Section::Vendas, _, _, VendasScreen::Historico) => SkillContext {
             name: "vendas.historico",
-            description: "Ajuda a consultar vendas anteriores e abrir uma venda para editar ou excluir.",
+            description: "Ajuda a filtrar vendas por periodo, consultar vendas anteriores e abrir uma venda para editar ou excluir.",
         },
         (Section::Pedidos, _, _, _) => SkillContext {
             name: "pedidos",
@@ -148,15 +148,21 @@ pub async fn openrouter_reply(
     user_message: &str,
     form: &TecidoForm,
 ) -> Result<String, String> {
+    openrouter_reply_with_context(skill, user_message, &screen_context(form)).await
+}
+
+pub async fn openrouter_reply_with_context(
+    skill: &SkillContext,
+    user_message: &str,
+    context: &str,
+) -> Result<String, String> {
     let api_key = std::env::var("OPENROUTER_API_KEY")
         .map_err(|_| String::from("OPENROUTER_API_KEY nao configurada"))?;
     let model = std::env::var("OPENROUTER_MODEL")
         .unwrap_or_else(|_| String::from("anthropic/claude-sonnet-4.5"));
     let system_prompt = format!(
-        "Voce e um agente especialista da TUI Razai. Responda em portugues, curto e pratico.\nSkill ativa: {}\nDescricao: {}\nContexto da tela: {}\nNao execute acoes no banco sem confirmacao explicita.",
-        skill.name,
-        skill.description,
-        screen_context(form)
+        "Voce e um agente especialista da TUI Razai. Responda em portugues, curto e pratico.\nSkill ativa: {}\nDescricao: {}\nContexto disponivel: {}\nNao diga que executou alteracoes; qualquer gravacao exige confirmacao no app.",
+        skill.name, skill.description, context
     );
     let request = ChatCompletionRequest {
         model,

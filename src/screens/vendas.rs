@@ -10,29 +10,32 @@ use crate::{
     app::App,
     db::{TecidoRecord, VinculoRecord},
     models::{FinalizarVendaOption, VendaField, VendaItem, VendasScreen},
-    ui::{centered_rect, color_swatch, selected_style},
+    ui::{SIDE_PANEL_WIDTH, centered_rect, color_swatch, selected_style},
 };
 
 pub fn render(frame: &mut Frame, area: Rect, app: &App) {
-    let chunks = Layout::default()
-        .direction(Direction::Horizontal)
-        .constraints([Constraint::Min(48), Constraint::Length(38)])
-        .split(area);
+    let chunks = (app.vendas_screen == VendasScreen::Lancamento).then(|| {
+        Layout::default()
+            .direction(Direction::Horizontal)
+            .constraints([Constraint::Min(48), Constraint::Length(SIDE_PANEL_WIDTH)])
+            .split(area)
+    });
+    let main_area = chunks.as_ref().map(|chunks| chunks[0]).unwrap_or(area);
 
     match app.vendas_screen {
-        VendasScreen::Menu => render_menu(frame, chunks[0], app.venda_menu_option),
+        VendasScreen::Menu => render_menu(frame, main_area, app.venda_menu_option),
         VendasScreen::SelecionarTecido => {
-            render_tecidos(frame, chunks[0], app.venda_tecido_option, &app.tecidos)
+            render_tecidos(frame, main_area, app.venda_tecido_option, &app.tecidos)
         }
         VendasScreen::SelecionarVinculo => render_vinculos(
             frame,
-            chunks[0],
+            main_area,
             app.venda_vinculo_option,
             &app.venda_vinculos,
         ),
         VendasScreen::Lancamento => render_lancamento(
             frame,
-            chunks[0],
+            main_area,
             app,
             app.venda_field,
             &app.venda_preco,
@@ -42,14 +45,26 @@ pub fn render(frame: &mut Frame, area: Rect, app: &App) {
         VendasScreen::Historico => {
             render_historico(
                 frame,
-                chunks[0],
+                main_area,
                 &app.vendas_historico,
                 app.venda_historico_option,
+                app.venda_historico_field,
+                &app.venda_historico_inicio,
+                &app.venda_historico_fim,
             );
         }
     }
 
-    render_resumo(frame, chunks[1], &app.venda_itens);
+    if let Some(chunks) = chunks {
+        render_resumo(
+            frame,
+            chunks[1],
+            &app.venda_itens,
+            app.venda_item_option,
+            app.venda_resumo_focus,
+            app.editing_venda_item,
+        );
+    }
     if app.finalizar_venda_dialog {
         render_finalizar_dialog(
             frame,
@@ -61,6 +76,9 @@ pub fn render(frame: &mut Frame, area: Rect, app: &App) {
     if app.pending_delete_venda {
         render_excluir_dialog(frame, area);
     }
+    if app.pending_delete_venda_item {
+        render_excluir_item_dialog(frame, area);
+    }
 }
 
 fn render_historico(
@@ -68,7 +86,26 @@ fn render_historico(
     area: Rect,
     vendas: &[crate::db::VendaHistoricoRecord],
     selected: usize,
+    selected_field: usize,
+    inicio: &str,
+    fim: &str,
 ) {
+    let chunks = Layout::default()
+        .direction(Direction::Vertical)
+        .constraints([Constraint::Length(4), Constraint::Min(5)])
+        .split(area);
+
+    let filters = Paragraph::new(Text::from(vec![
+        format_history_field(0, selected_field, "Data inicio", inicio),
+        format_history_field(1, selected_field, "Data fim", fim),
+    ]))
+    .block(
+        Block::default()
+            .title("Vendas > Historico > Periodo")
+            .borders(Borders::ALL),
+    );
+    frame.render_widget(filters, chunks[0]);
+
     let items = if vendas.is_empty() {
         vec![ListItem::new("Nenhuma venda finalizada.")]
     } else {
@@ -85,16 +122,34 @@ fn render_historico(
             })
             .collect()
     };
-    let mut state = ListState::default().with_selected((!vendas.is_empty()).then_some(selected));
+    let mut state = ListState::default()
+        .with_selected((!vendas.is_empty() && selected_field == 2).then_some(selected));
     let list = List::new(items)
         .block(
             Block::default()
-                .title("Vendas > Historico")
-                .borders(Borders::ALL),
+                .title("Vendas do periodo")
+                .borders(Borders::ALL)
+                .border_style(if selected_field == 2 {
+                    Style::default().fg(Color::Cyan)
+                } else {
+                    Style::default()
+                }),
         )
         .highlight_symbol("> ")
         .highlight_style(Style::default().fg(Color::Black).bg(Color::Cyan).bold());
-    frame.render_stateful_widget(list, area, &mut state);
+    frame.render_stateful_widget(list, chunks[1], &mut state);
+}
+
+fn format_history_field(field: usize, selected: usize, label: &str, value: &str) -> Line<'static> {
+    let is_selected = field == selected;
+    Line::from(vec![
+        Span::styled(
+            if is_selected { "> " } else { "  " },
+            selected_style(is_selected),
+        ),
+        Span::raw(format!("{label}: ")),
+        Span::styled(value.to_string(), Style::default().fg(Color::Yellow)),
+    ])
 }
 
 fn render_menu(frame: &mut Frame, area: Rect, selected: usize) {
@@ -202,7 +257,16 @@ fn render_lancamento(
     lines.push(Line::from(""));
     lines.extend([
         format_field(VendaField::Preco, field, "Preco Unitario", preco),
-        format_field(VendaField::Quantidade, field, "Lancar", quantidade),
+        format_field(
+            VendaField::Quantidade,
+            field,
+            if app.editing_venda_item.is_some() {
+                "Atualizar"
+            } else {
+                "Lancar"
+            },
+            quantidade,
+        ),
         Line::from(""),
         format_action(
             VendaField::Finalizar,
@@ -231,16 +295,32 @@ fn render_lancamento(
     frame.render_widget(widget, area);
 }
 
-fn render_resumo(frame: &mut Frame, area: Rect, itens: &[VendaItem]) {
+fn render_resumo(
+    frame: &mut Frame,
+    area: Rect,
+    itens: &[VendaItem],
+    selected: usize,
+    focused: bool,
+    editing: Option<usize>,
+) {
     let mut lines = Vec::new();
-    for item in itens {
-        lines.push(Line::from(item.descricao.clone()));
-        lines.push(Line::from(format!(
-            "QTD: {} x R${} - Total: R${}",
-            format_quantity(item.quantidade),
-            format_money(item.preco_unitario),
-            format_money(item.total())
-        )));
+    for (index, item) in itens.iter().enumerate() {
+        let is_selected = focused && index == selected;
+        let marker = if is_selected { "> " } else { "  " };
+        let editing_marker = if editing == Some(index) { " *" } else { "" };
+        lines.push(Line::from(vec![
+            Span::styled(marker, selected_style(is_selected)),
+            Span::raw(format!("{}{}", item.descricao, editing_marker)),
+        ]));
+        lines.push(Line::from(vec![
+            Span::raw("  "),
+            Span::raw(format!(
+                "QTD: {} x R${} - Total: R${}",
+                format_quantity(item.quantidade),
+                format_money(item.preco_unitario),
+                format_money(item.total())
+            )),
+        ]));
         lines.push(Line::from(""));
     }
     let total = itens.iter().map(VendaItem::total).sum::<f64>();
@@ -250,8 +330,17 @@ fn render_resumo(frame: &mut Frame, area: Rect, itens: &[VendaItem]) {
     )));
     let widget = Paragraph::new(Text::from(lines)).block(
         Block::default()
-            .title("Resumo do pedido")
-            .borders(Borders::ALL),
+            .title(if focused {
+                "Resumo do pedido > Enter editar | Del excluir"
+            } else {
+                "Resumo do pedido"
+            })
+            .borders(Borders::ALL)
+            .border_style(if focused {
+                Style::default().fg(Color::Cyan)
+            } else {
+                Style::default()
+            }),
     );
     frame.render_widget(widget, area);
 }
@@ -413,6 +502,24 @@ fn render_excluir_dialog(frame: &mut Frame, area: Rect) {
     let popup_area = centered_rect(48, 7, area);
     let dialog = Paragraph::new(Text::from(vec![
         Line::from("Excluir esta venda?"),
+        Line::from(""),
+        Line::from("[Enter/S] Confirmar   [Esc/N] Voltar"),
+    ]))
+    .block(
+        Block::default()
+            .title("Confirmar exclusao")
+            .borders(Borders::ALL)
+            .border_style(Style::default().fg(Color::Red)),
+    )
+    .alignment(Alignment::Center);
+
+    frame.render_widget(dialog, popup_area);
+}
+
+fn render_excluir_item_dialog(frame: &mut Frame, area: Rect) {
+    let popup_area = centered_rect(48, 7, area);
+    let dialog = Paragraph::new(Text::from(vec![
+        Line::from("Excluir este lancamento?"),
         Line::from(""),
         Line::from("[Enter/S] Confirmar   [Esc/N] Voltar"),
     ]))

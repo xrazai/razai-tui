@@ -4,7 +4,7 @@ pub use sku::{build_estampa_vinculo_sku, build_vinculo_sku};
 use crate::db::{CorRecord, EstampaRecord, TecidoRecord};
 
 mod core;
-pub use core::{ChatMessage, ChatState, Focus};
+pub use core::{AgentAction, ChatMessage, ChatState, Focus};
 
 #[derive(Clone, Copy, Default, Eq, PartialEq)]
 pub enum VendasScreen {
