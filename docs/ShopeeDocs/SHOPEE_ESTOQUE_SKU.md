@@ -16,6 +16,13 @@ O estoque somado atual do SKU Pai e da variacao e mostrado apenas como referenci
 - `GET /api/v2/product/get_model_list`
 - `POST /api/v2/product/update_stock`
 
+## Performance de carregamento
+
+- A listagem inicial de IDs continua paginada pela Shopee.
+- As consultas de detalhes (`get_item_base_info`) rodam em lotes de ate 50 itens com concorrencia controlada.
+- As consultas de variacoes (`get_model_list`) tambem rodam em paralelo com limite interno de concorrencia.
+- O limite evita disparar chamadas demais ao mesmo tempo e reduz o tempo total em lojas com muitos anuncios com variacao.
+
 ## Regra de agrupamento hierarquico
 
 - Itens com variacao usam `item_sku` como SKU Pai e `model_sku` como SKU da variacao.

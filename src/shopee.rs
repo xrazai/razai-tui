@@ -35,6 +35,7 @@ const SHOPEE_FABRIC_CATEGORY_ID: i64 = 100416;
 const SHOPEE_FABRIC_CATEGORY_LABEL: &str = "Roupas Femininas > Tecidos > Outros";
 const SHOPEE_FABRIC_NCM: &str = "55161300";
 const SHOPEE_MAX_MODEL_PRICE_RATIO: f64 = 5.0;
+const SHOPEE_STOCK_FETCH_CONCURRENCY: usize = 8;
 static CALLBACK_LISTENER_STARTED: AtomicBool = AtomicBool::new(false);
 
 #[derive(Clone)]
@@ -384,12 +385,10 @@ async fn fetch_online_stock_groups_with_tokens(
     tokens: &ShopeeTokens,
 ) -> Result<Vec<ShopeeStockParentGroup>, ShopeeError> {
     let item_ids = get_all_item_ids(config, tokens).await?;
-    let mut item_infos = Vec::new();
-    for chunk in item_ids.chunks(50) {
-        item_infos.extend(get_item_base_infos(config, tokens, chunk).await?);
-    }
+    let item_infos = get_all_item_base_infos(config, tokens, &item_ids).await?;
 
     let mut occurrences = Vec::new();
+    let mut model_tasks = tokio::task::JoinSet::new();
     for item in item_infos {
         let item_id = item.get("item_id").and_then(Value::as_i64).unwrap_or(0);
         let item_name = item
@@ -402,11 +401,22 @@ async fn fetch_online_stock_groups_with_tokens(
             .and_then(Value::as_bool)
             .unwrap_or(false);
         if has_model {
-            let models = get_model_list(config, tokens, item_id).await?;
-            occurrences.extend(model_occurrences(&item, item_id, &item_name, &models));
+            if model_tasks.len() >= SHOPEE_STOCK_FETCH_CONCURRENCY {
+                let models = join_shopee_task(model_tasks.join_next().await)?;
+                occurrences.extend(models);
+            }
+            let task_config = config.clone();
+            let task_tokens = tokens.clone();
+            model_tasks.spawn(async move {
+                let models = get_model_list(&task_config, &task_tokens, item_id).await?;
+                Ok::<_, ShopeeError>(model_occurrences(&item, item_id, &item_name, &models))
+            });
         } else if let Some(occurrence) = item_occurrence(&item) {
             occurrences.push(occurrence);
         }
+    }
+    while let Some(result) = model_tasks.join_next().await {
+        occurrences.extend(join_shopee_task(Some(result))?);
     }
 
     Ok(group_stock_occurrences_by_parent(occurrences))
@@ -586,6 +596,38 @@ async fn get_all_item_ids(
             .unwrap_or_else(|| item_ids.len().to_string());
     }
     Ok(item_ids)
+}
+
+async fn get_all_item_base_infos(
+    config: &ShopeeConfig,
+    tokens: &ShopeeTokens,
+    item_ids: &[i64],
+) -> Result<Vec<Value>, ShopeeError> {
+    let mut item_infos = Vec::new();
+    let mut tasks = tokio::task::JoinSet::new();
+    for chunk in item_ids.chunks(50) {
+        if tasks.len() >= SHOPEE_STOCK_FETCH_CONCURRENCY {
+            item_infos.extend(join_shopee_task(tasks.join_next().await)?);
+        }
+        let task_config = config.clone();
+        let task_tokens = tokens.clone();
+        let task_item_ids = chunk.to_vec();
+        tasks.spawn(async move {
+            get_item_base_infos(&task_config, &task_tokens, &task_item_ids).await
+        });
+    }
+    while let Some(result) = tasks.join_next().await {
+        item_infos.extend(join_shopee_task(Some(result))?);
+    }
+    Ok(item_infos)
+}
+
+fn join_shopee_task<T>(
+    result: Option<Result<Result<T, ShopeeError>, tokio::task::JoinError>>,
+) -> Result<T, ShopeeError> {
+    result
+        .ok_or_else(|| ShopeeError::Http("tarefa Shopee finalizada sem resultado".to_string()))?
+        .map_err(|error| ShopeeError::Http(error.to_string()))?
 }
 
 async fn get_item_base_infos(

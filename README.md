@@ -127,6 +127,8 @@ Para conectar a loja, abra o link terminado em `/shopee/auth`. A rota `/shopee/c
 - estoque atual somado;
 - modo selecionado para sincronizacao.
 
+Para acelerar lojas com muitos anuncios, os detalhes dos itens e as variacoes sao buscados em paralelo com concorrencia controlada.
+
 Controles:
 
 - `Enter`: se ainda nao carregou, busca o estoque; em SKU Pai, expande/recolhe; em variacao, confirma sync da variacao.
