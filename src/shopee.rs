@@ -1,7 +1,10 @@
 use std::{
     collections::HashMap,
     fs,
+    io::{Read, Write},
+    net::{TcpListener, TcpStream},
     path::Path,
+    thread,
     time::{Duration, SystemTime, UNIX_EPOCH},
 };
 
@@ -122,6 +125,36 @@ pub async fn exchange_code(pool: Option<&PgPool>, code: &str) -> Result<(), Shop
 
     let token_response = parse_token_response(response).await?;
     persist_tokens(pool, &token_response).await
+}
+
+pub fn start_callback_listener(pool: Option<PgPool>) -> Result<String, ShopeeError> {
+    let config = ShopeeConfig::from_env()?;
+    let addr = std::env::var("SHOPEE_CALLBACK_ADDR")
+        .ok()
+        .filter(|value| !value.trim().is_empty())
+        .unwrap_or_else(|| String::from("127.0.0.1:8910"));
+    let listener = TcpListener::bind(&addr)
+        .map_err(|error| ShopeeError::Http(format!("falha ao abrir callback local {addr}: {error}")))?;
+    let auth_url = authorization_url(&config);
+
+    thread::spawn(move || {
+        if let Ok((mut stream, _)) = listener.accept() {
+            let result = handle_callback_stream(pool.as_ref(), &mut stream);
+            let body = match result {
+                Ok(()) => "Shopee conectada. Tokens salvos. Pode voltar ao Razai TUI.",
+                Err(error) => {
+                    let message = format!("Falha ao conectar Shopee: {error}");
+                    let _ = write_http_response(&mut stream, &message);
+                    return;
+                }
+            };
+            let _ = write_http_response(&mut stream, body);
+        }
+    });
+
+    Ok(format!(
+        "Callback local aguardando em http://{addr}. Configure o ngrok para essa porta e abra: {auth_url}"
+    ))
 }
 
 async fn ensure_connected(pool: Option<&PgPool>) -> Result<ShopeeTokens, ShopeeError> {
@@ -366,6 +399,91 @@ fn signed_public_url(
     )
 }
 
+fn authorization_url(config: &ShopeeConfig) -> String {
+    let path = "/api/v2/shop/auth_partner";
+    let timestamp = now_timestamp();
+    let sign = public_sign(config.partner_id, path, timestamp, &config.partner_key);
+    let redirect = config.redirect_url.as_deref().unwrap_or_default();
+    format!(
+        "{}{}?partner_id={}&timestamp={}&sign={}&redirect={}",
+        config.api_host,
+        path,
+        config.partner_id,
+        timestamp,
+        sign,
+        percent_encode(redirect)
+    )
+}
+
+fn handle_callback_stream(pool: Option<&PgPool>, stream: &mut TcpStream) -> Result<(), ShopeeError> {
+    let mut buffer = [0_u8; 4096];
+    let size = stream
+        .read(&mut buffer)
+        .map_err(|error| ShopeeError::Http(format!("falha ao ler callback: {error}")))?;
+    let request = String::from_utf8_lossy(&buffer[..size]);
+    let code = extract_code_from_http_request(&request)
+        .ok_or_else(|| ShopeeError::Api(String::from("callback recebido sem code")))?;
+    let runtime = tokio::runtime::Runtime::new()
+        .map_err(|error| ShopeeError::Http(format!("falha ao iniciar runtime: {error}")))?;
+    runtime.block_on(exchange_code(pool, &code))
+}
+
+fn write_http_response(stream: &mut TcpStream, body: &str) -> std::io::Result<()> {
+    let response = format!(
+        "HTTP/1.1 200 OK\r\nContent-Type: text/plain; charset=utf-8\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{}",
+        body.len(),
+        body
+    );
+    stream.write_all(response.as_bytes())
+}
+
+fn extract_code_from_http_request(request: &str) -> Option<String> {
+    let first_line = request.lines().next()?;
+    let path = first_line.split_whitespace().nth(1)?;
+    let query = path.split_once('?')?.1;
+    for part in query.split('&') {
+        if let Some(code) = part.strip_prefix("code=") {
+            return non_empty_owned(&percent_decode(code));
+        }
+    }
+    None
+}
+
+fn non_empty_owned(value: &str) -> Option<String> {
+    let value = value.trim();
+    (!value.is_empty()).then(|| value.to_string())
+}
+
+fn percent_encode(value: &str) -> String {
+    let mut output = String::new();
+    for byte in value.bytes() {
+        if byte.is_ascii_alphanumeric() || matches!(byte, b'-' | b'_' | b'.' | b'~') {
+            output.push(byte as char);
+        } else {
+            output.push_str(&format!("%{byte:02X}"));
+        }
+    }
+    output
+}
+
+fn percent_decode(value: &str) -> String {
+    let mut output = Vec::new();
+    let bytes = value.as_bytes();
+    let mut index = 0;
+    while index < bytes.len() {
+        if bytes[index] == b'%' && index + 2 < bytes.len() {
+            if let Ok(hex) = u8::from_str_radix(&value[index + 1..index + 3], 16) {
+                output.push(hex);
+                index += 3;
+                continue;
+            }
+        }
+        output.push(if bytes[index] == b'+' { b' ' } else { bytes[index] });
+        index += 1;
+    }
+    String::from_utf8_lossy(&output).to_string()
+}
+
 pub fn should_refresh(access_token_expires_at: i64, now: i64) -> bool {
     access_token_expires_at <= 0 || access_token_expires_at - now <= REFRESH_WINDOW_SECONDS
 }
@@ -574,5 +692,22 @@ mod tests {
         let value = json!({"error": "error_auth", "message": "Invalid access_token."});
         let error = ensure_no_api_error(&value).unwrap_err();
         assert!(error.is_token_error());
+    }
+
+    #[test]
+    fn callback_request_extracts_code() {
+        let request = "GET /shopee/callback?code=abc%20123&shop_id=1 HTTP/1.1\r\nHost: localhost\r\n\r\n";
+        assert_eq!(
+            extract_code_from_http_request(request),
+            Some(String::from("abc 123"))
+        );
+    }
+
+    #[test]
+    fn redirect_url_is_percent_encoded() {
+        assert_eq!(
+            percent_encode("https://example.ngrok.app/shopee/callback"),
+            "https%3A%2F%2Fexample.ngrok.app%2Fshopee%2Fcallback"
+        );
     }
 }
