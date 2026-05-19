@@ -106,6 +106,7 @@ pub struct App {
     pub finalizar_pedido_dialog: bool,
     pub finalizar_pedido_option: FinalizarVendaOption,
     pub pending_approve_pedido: bool,
+    pub shopee_menu_option: usize,
     pub printers: Vec<String>,
     pub printer_option: usize,
     pub selected_printer: Option<String>,
@@ -208,6 +209,7 @@ impl App {
             finalizar_pedido_dialog: false,
             finalizar_pedido_option: FinalizarVendaOption::default(),
             pending_approve_pedido: false,
+            shopee_menu_option: 0,
             printers,
             printer_option,
             selected_printer,
@@ -289,6 +291,10 @@ impl App {
         }
         if self.section == Section::Pedidos {
             self.handle_pedidos_key(key.code);
+            return;
+        }
+        if self.section == Section::Shopee {
+            self.handle_shopee_key(key.code);
             return;
         }
         if self.section == Section::Configuracoes {
@@ -458,6 +464,24 @@ impl App {
             KeyCode::BackTab => self.focus.previous(),
             _ => self.focus.next(),
         };
+    }
+
+    fn handle_shopee_key(&mut self, key: KeyCode) {
+        match key {
+            KeyCode::Esc => self.running = false,
+            KeyCode::Up | KeyCode::Down => {
+                self.shopee_menu_option = (self.shopee_menu_option + 1) % 2;
+            }
+            KeyCode::Enter => {
+                self.db_status = match self.shopee_menu_option {
+                    0 => String::from("Shopee > Criar anuncio ainda nao implementado"),
+                    _ => String::from("Shopee > Estoque Online ainda nao implementado"),
+                };
+            }
+            KeyCode::Char('1') => self.shopee_menu_option = 0,
+            KeyCode::Char('2') => self.shopee_menu_option = 1,
+            _ => {}
+        }
     }
 
     fn submit_chat(&mut self) {
@@ -653,6 +677,7 @@ impl App {
             Section::Vendas => screens::vendas::render(frame, body[0], self),
             Section::Pedidos => screens::pedidos::render(frame, body[0], self),
             Section::Dados => screens::dados::render(frame, body[0], self),
+            Section::Shopee => screens::shopee::render(frame, body[0], self.shopee_menu_option),
             Section::Configuracoes => screens::configuracoes::render(frame, body[0], self),
             section => screens::chrome::render_content(frame, body[0], section),
         }
