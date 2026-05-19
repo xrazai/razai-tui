@@ -138,6 +138,12 @@ Controles:
 
 A sincronizacao altera apenas a variacao selecionada e exige confirmacao. Itens sem variacao usam `model_id=0`. Grupos multi-location ficam bloqueados para atualizacao automatica.
 
+### Atualizar Anuncios
+
+`Atualizar anuncios` seleciona um tecido local e busca anuncios Shopee com `item_sku` igual ao SKU do tecido. Para cada anuncio encontrado, o sistema valida a estrutura `Cor x Tamanho`, compara as cores publicadas com os vinculos locais e adiciona somente as cores faltantes.
+
+Os novos modelos preservam os precos ja existentes por tamanho no proprio anuncio, entram com estoque inicial `1`, usam o SKU do vinculo e reaproveitam a imagem atual do tier de cor quando disponivel. O fluxo mostra uma previa e exige confirmacao antes de chamar a Shopee.
+
 ### Criar Anuncio
 
 O fluxo de criacao seleciona um tecido local, usa a categoria `Roupas Femininas > Tecidos > Outros`, reaproveita a imagem de `SHOPEE_DEFAULT_IMAGE_PATH` ou a primeira imagem encontrada em `Pictures`, gera variacoes por cor e tamanho, calcula peso por gramatura linear, calcula preco por tamanho a partir do preco por metro e publica como `NORMAL`. Os requisitos detalhados ficam em:

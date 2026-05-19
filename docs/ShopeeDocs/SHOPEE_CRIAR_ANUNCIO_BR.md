@@ -20,6 +20,36 @@
 - `POST /api/v2/product/add_item`
 - `POST /api/v2/product/init_tier_variation`
 
+## Atualizar anuncio existente por SKU Pai
+
+O fluxo `Shopee > Atualizar anuncios` sincroniza vinculos locais faltantes para anuncios ja publicados:
+
+1. Selecionar tecido local.
+2. Buscar anuncios Shopee e filtrar `item_sku == SKU do tecido`.
+3. Buscar modelos de cada anuncio com `get_model_list`.
+4. Validar estrutura `Cor x Tamanho`.
+5. Comparar cores do tier `Cor` com os vinculos locais.
+6. Adicionar somente cores faltantes com `update_tier_variation`.
+7. Criar os novos modelos com `add_model`, preservando os precos remotos por tamanho.
+
+Endpoints usados:
+
+- `GET /api/v2/product/get_item_list`
+- `GET /api/v2/product/get_item_base_info`
+- `GET /api/v2/product/get_model_list`
+- `POST /api/v2/product/update_tier_variation`
+- `POST /api/v2/product/add_model`
+
+Regras:
+
+- Atualiza todos os anuncios encontrados para o mesmo SKU Pai.
+- Nao remove cores, tamanhos nem modelos existentes.
+- Bloqueia anuncios que nao estejam em `Cor x Tamanho`.
+- Bloqueia quando o total final passaria de 100 combinacoes.
+- Novas variacoes entram com estoque inicial `1`.
+- Novas cores reaproveitam a imagem existente do tier de cor quando disponivel.
+- Cada tamanho novo usa o preco ja existente daquele tamanho no proprio anuncio.
+
 ## Campos obrigatorios base
 
 - `item_name`
