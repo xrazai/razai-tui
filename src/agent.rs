@@ -110,6 +110,10 @@ pub fn active_context(
             capability: "shopee",
             description: "Ajuda com rotinas e consultas relacionadas a Shopee.",
         },
+        (Section::Documentos, _, _, _) => AgentContext {
+            capability: "documentos",
+            description: "Ajuda a gerar documentos operacionais, como checklist PDF de vinculos por tecido.",
+        },
         (Section::Configuracoes, _, _, _) => AgentContext {
             capability: "configuracoes.impressora_recibo",
             description: "Ajuda a configurar a impressora termica 80mm para recibos de venda com envio direto.",
