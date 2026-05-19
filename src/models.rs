@@ -659,6 +659,10 @@ pub fn parse_hex_color(hex: &str) -> Option<(u8, u8, u8)> {
     Some((red, green, blue))
 }
 
+pub fn is_complete_hex_color(hex: &str) -> bool {
+    parse_hex_color(hex).is_some()
+}
+
 #[derive(Clone, Debug)]
 pub struct ColorDistance {
     pub nome: String,
