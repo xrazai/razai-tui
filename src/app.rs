@@ -21,8 +21,7 @@ use crate::{
         VinculoRecord,
     },
     models::*,
-    screens,
-    shopee,
+    screens, shopee,
     ui::SIDE_PANEL_WIDTH,
 };
 
@@ -108,6 +107,9 @@ pub struct App {
     pub finalizar_pedido_option: FinalizarVendaOption,
     pub pending_approve_pedido: bool,
     pub shopee_menu_option: usize,
+    pub shopee_stock_groups: Vec<shopee::ShopeeStockGroup>,
+    pub shopee_stock_option: usize,
+    pub shopee_stock_confirm: bool,
     pub shopee_status: String,
     pub printers: Vec<String>,
     pub printer_option: usize,
@@ -213,6 +215,9 @@ impl App {
             finalizar_pedido_option: FinalizarVendaOption::default(),
             pending_approve_pedido: false,
             shopee_menu_option: 0,
+            shopee_stock_groups: Vec::new(),
+            shopee_stock_option: 0,
+            shopee_stock_confirm: false,
             shopee_status,
             printers,
             printer_option,
@@ -471,25 +476,121 @@ impl App {
     }
 
     fn handle_shopee_key(&mut self, key: KeyCode) {
+        if self.shopee_stock_confirm {
+            match key {
+                KeyCode::Esc | KeyCode::Char('n') | KeyCode::Char('N') => {
+                    self.shopee_stock_confirm = false;
+                    self.shopee_status = String::from("Sincronizacao de estoque cancelada.");
+                }
+                KeyCode::Enter | KeyCode::Char('s') | KeyCode::Char('S') => {
+                    let groups = self
+                        .shopee_stock_groups
+                        .get(self.shopee_stock_option)
+                        .cloned()
+                        .into_iter()
+                        .collect::<Vec<_>>();
+                    let status = match self.db_runtime.block_on(shopee::sync_stock_groups(
+                        self.db_pool.as_ref(),
+                        &groups,
+                    )) {
+                        Ok(result) => format!(
+                            "Sync Shopee concluido. Atualizados: {}. Ignorados: {}. Falhas: {}{}",
+                            result.updated,
+                            result.skipped,
+                            result.failed.len(),
+                            if result.failed.is_empty() {
+                                String::new()
+                            } else {
+                                format!(". {}", result.failed.join(" | "))
+                            }
+                        ),
+                        Err(error) => format!("Shopee: falha ao sincronizar estoque: {error}"),
+                    };
+                    self.shopee_stock_confirm = false;
+                    self.shopee_status = status.clone();
+                    self.db_status = status;
+                }
+                _ => {}
+            }
+            return;
+        }
+
         match key {
             KeyCode::Esc => self.running = false,
+            KeyCode::Left => self.section = self.section.previous(),
+            KeyCode::Right => self.section = self.section.next(),
             KeyCode::Up | KeyCode::Down => {
-                self.shopee_menu_option = (self.shopee_menu_option + 1) % 2;
+                if self.shopee_menu_option == 1 && !self.shopee_stock_groups.is_empty() {
+                    if key == KeyCode::Up {
+                        self.shopee_stock_option =
+                            (self.shopee_stock_option + self.shopee_stock_groups.len() - 1)
+                                % self.shopee_stock_groups.len();
+                    } else {
+                        self.shopee_stock_option =
+                            (self.shopee_stock_option + 1) % self.shopee_stock_groups.len();
+                    }
+                } else {
+                    self.shopee_menu_option = if key == KeyCode::Up {
+                        (self.shopee_menu_option + 2) % 3
+                    } else {
+                        (self.shopee_menu_option + 1) % 3
+                    };
+                }
+            }
+            KeyCode::Char(' ') => {
+                if self.shopee_menu_option == 1 {
+                    if let Some(group) = self.shopee_stock_groups.get_mut(self.shopee_stock_option)
+                    {
+                        group.toggle_target();
+                        self.shopee_status =
+                            format!("SKU {} marcado para {}.", group.sku, group.target_label());
+                    }
+                }
             }
             KeyCode::Enter => {
                 let status = match self.shopee_menu_option {
                     0 => self
                         .db_runtime
                         .block_on(shopee::create_listing_status(self.db_pool.as_ref())),
-                    _ => self
-                        .db_runtime
-                        .block_on(shopee::online_stock_summary(self.db_pool.as_ref())),
+                    1 if self.shopee_stock_groups.is_empty() => {
+                        match self
+                            .db_runtime
+                            .block_on(shopee::fetch_online_stock_groups(self.db_pool.as_ref()))
+                        {
+                            Ok(groups) => {
+                                let occurrences = groups
+                                    .iter()
+                                    .map(|group| group.occurrences.len())
+                                    .sum::<usize>();
+                                self.shopee_stock_groups = groups;
+                                self.shopee_stock_option = 0;
+                                format!(
+                                    "Estoque Online carregado: {} SKUs, {occurrences} anuncios/modelos. Space alterna 0/100; Enter confirma sync.",
+                                    self.shopee_stock_groups.len()
+                                )
+                            }
+                            Err(error) => format!("Shopee: falha ao consultar estoque: {error}"),
+                        }
+                    }
+                    1 => {
+                        self.shopee_stock_confirm = true;
+                        String::from(
+                            "Confirmar sincronizacao do SKU selecionado? Enter/S confirma; Esc/N cancela.",
+                        )
+                    }
+                    _ => shopee::listing_guide_status(),
                 };
                 self.shopee_status = status.clone();
                 self.db_status = status;
             }
             KeyCode::Char('1') => self.shopee_menu_option = 0,
             KeyCode::Char('2') => self.shopee_menu_option = 1,
+            KeyCode::Char('3') => self.shopee_menu_option = 2,
+            KeyCode::Char('r') | KeyCode::Char('R') => {
+                self.shopee_stock_groups.clear();
+                self.shopee_stock_option = 0;
+                self.shopee_status = String::from("Estoque Shopee limpo. Enter recarrega.");
+            }
             _ => {}
         }
     }
@@ -721,6 +822,9 @@ impl App {
                 frame,
                 body[0],
                 self.shopee_menu_option,
+                &self.shopee_stock_groups,
+                self.shopee_stock_option,
+                self.shopee_stock_confirm,
                 &self.shopee_status,
             ),
             Section::Configuracoes => screens::configuracoes::render(frame, body[0], self),

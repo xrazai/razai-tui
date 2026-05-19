@@ -13,7 +13,7 @@ use std::{
 use hmac::{Hmac, Mac};
 use reqwest::StatusCode;
 use serde::{Deserialize, Serialize};
-use serde_json::Value;
+use serde_json::{Value, json};
 use sha2::Sha256;
 use sqlx::PgPool;
 
@@ -47,6 +47,53 @@ pub struct ShopeeTokens {
     pub refresh_token: String,
     pub access_token_expires_at: i64,
     pub refresh_token_expires_at: i64,
+}
+
+#[derive(Clone, Debug)]
+pub struct ShopeeStockOccurrence {
+    pub sku: String,
+    pub item_id: i64,
+    pub model_id: i64,
+    pub name: String,
+    pub seller_stock: i64,
+    pub available_stock: i64,
+    pub reserved_stock: i64,
+    pub location_id: Option<String>,
+    pub multi_location: bool,
+}
+
+#[derive(Clone, Debug)]
+pub struct ShopeeStockGroup {
+    pub sku: String,
+    pub occurrences: Vec<ShopeeStockOccurrence>,
+    pub total_current_stock: i64,
+    pub target_stock: i64,
+    pub warning: Option<String>,
+}
+
+#[derive(Clone, Debug, Default)]
+pub struct ShopeeStockSyncResult {
+    pub updated: usize,
+    pub skipped: usize,
+    pub failed: Vec<String>,
+}
+
+impl ShopeeStockGroup {
+    pub fn can_sync(&self) -> bool {
+        self.warning.is_none()
+    }
+
+    pub fn target_label(&self) -> &'static str {
+        if self.target_stock == 100 {
+            "Ativar 100"
+        } else {
+            "Zerar 0"
+        }
+    }
+
+    pub fn toggle_target(&mut self) {
+        self.target_stock = if self.target_stock == 0 { 100 } else { 0 };
+    }
 }
 
 #[derive(Debug, Deserialize)]
@@ -110,35 +157,49 @@ pub fn ensure_ngrok_tunnel() -> String {
     String::from("Ngrok iniciado, mas URL publica ainda nao foi detectada")
 }
 
-pub async fn online_stock_summary(pool: Option<&PgPool>) -> String {
-    let config = match ShopeeConfig::from_env() {
-        Ok(config) => config,
-        Err(error) => return format!("Shopee desconectada: {error}"),
-    };
-    let tokens = match ensure_connected_with_config(pool, &config).await {
-        Ok(tokens) => tokens,
-        Err(error) => return format!("Shopee desconectada: {error}"),
-    };
-
-    match get_item_list(&config, &tokens).await {
-        Ok(count) => format!("Shopee conectada. Estoque Online retornou {count} anuncios."),
-        Err(error) if error.is_token_error() => match refresh_tokens(pool, &config, &tokens).await {
-            Ok(tokens) => match get_item_list(&config, &tokens).await {
-                Ok(count) => format!("Shopee conectada. Estoque Online retornou {count} anuncios."),
-                Err(error) => format!("Shopee: falha ao consultar estoque online: {error}"),
-            },
-            Err(error) => format!("Shopee precisa reautorizar: {error}"),
-        },
-        Err(error) => format!("Shopee: falha ao consultar estoque online: {error}"),
-    }
-}
-
 pub async fn create_listing_status(pool: Option<&PgPool>) -> String {
     match ensure_connected(pool).await {
         Ok(_) => String::from(
-            "Shopee conectada. Criar anuncio preparado; validar categorias, atributos, imagens e estoque BR antes de publicar.",
+            "Shopee conectada. Criar anuncio: selecione produto local, categoria, atributos obrigatorios, imagens, logistica, estoque, GTIN e fiscal BR; publicar NORMAL apos revisao.",
         ),
         Err(error) => format!("Shopee desconectada: {error}"),
+    }
+}
+
+pub fn listing_guide_status() -> String {
+    String::from(
+        "Guia Shopee BR: Criar anuncio exige produto local, categoria, atributos obrigatorios, marca, logistica, preco, peso, dimensoes, estoque, GTIN, imagens e tax_info BR. Consulte docs/ShopeeDocs/SHOPEE_CRIAR_ANUNCIO_BR.md e SHOPEE_ESTOQUE_SKU.md.",
+    )
+}
+
+pub async fn fetch_online_stock_groups(
+    pool: Option<&PgPool>,
+) -> Result<Vec<ShopeeStockGroup>, ShopeeError> {
+    let config = ShopeeConfig::from_env()?;
+    let tokens = ensure_connected_with_config(pool, &config).await?;
+    match fetch_online_stock_groups_with_tokens(&config, &tokens).await {
+        Ok(groups) => Ok(groups),
+        Err(error) if error.is_token_error() => {
+            let tokens = refresh_tokens(pool, &config, &tokens).await?;
+            fetch_online_stock_groups_with_tokens(&config, &tokens).await
+        }
+        Err(error) => Err(error),
+    }
+}
+
+pub async fn sync_stock_groups(
+    pool: Option<&PgPool>,
+    groups: &[ShopeeStockGroup],
+) -> Result<ShopeeStockSyncResult, ShopeeError> {
+    let config = ShopeeConfig::from_env()?;
+    let tokens = ensure_connected_with_config(pool, &config).await?;
+    match sync_stock_groups_with_tokens(&config, &tokens, groups).await {
+        Ok(result) => Ok(result),
+        Err(error) if error.is_token_error() => {
+            let tokens = refresh_tokens(pool, &config, &tokens).await?;
+            sync_stock_groups_with_tokens(&config, &tokens, groups).await
+        }
+        Err(error) => Err(error),
     }
 }
 
@@ -175,8 +236,9 @@ pub fn start_callback_listener(pool: Option<PgPool>) -> Result<String, ShopeeErr
             "Callback Shopee ja ativo em http://{addr}. Push URL: /shopee/push. Redirect OAuth: /shopee/callback. Abra para conectar: {auth_url}"
         ));
     }
-    let listener = TcpListener::bind(&addr)
-        .map_err(|error| ShopeeError::Http(format!("falha ao abrir callback local {addr}: {error}")))?;
+    let listener = TcpListener::bind(&addr).map_err(|error| {
+        ShopeeError::Http(format!("falha ao abrir callback local {addr}: {error}"))
+    })?;
     CALLBACK_LISTENER_STARTED.store(true, Ordering::SeqCst);
 
     thread::spawn(move || {
@@ -266,25 +328,178 @@ async fn refresh_tokens(
     Ok(token_response)
 }
 
-async fn get_item_list(
+async fn fetch_online_stock_groups_with_tokens(
     config: &ShopeeConfig,
     tokens: &ShopeeTokens,
-) -> Result<usize, ShopeeError> {
-    let path = "/api/v2/product/get_item_list";
-    let timestamp = now_timestamp();
-    let sign = shop_sign(
-        config.partner_id,
-        path,
-        timestamp,
-        &tokens.access_token,
-        config.shop_id,
-        &config.partner_key,
-    );
-    let url = format!(
-        "{}{}?partner_id={}&timestamp={}&access_token={}&shop_id={}&sign={}&offset=0&page_size=20&item_status=NORMAL",
-        config.api_host, path, config.partner_id, timestamp, tokens.access_token, config.shop_id, sign
-    );
+) -> Result<Vec<ShopeeStockGroup>, ShopeeError> {
+    let item_ids = get_all_item_ids(config, tokens).await?;
+    let mut item_infos = Vec::new();
+    for chunk in item_ids.chunks(50) {
+        item_infos.extend(get_item_base_infos(config, tokens, chunk).await?);
+    }
 
+    let mut occurrences = Vec::new();
+    for item in item_infos {
+        let item_id = item.get("item_id").and_then(Value::as_i64).unwrap_or(0);
+        let item_name = item
+            .get("item_name")
+            .and_then(Value::as_str)
+            .unwrap_or("sem nome")
+            .to_string();
+        let has_model = item
+            .get("has_model")
+            .and_then(Value::as_bool)
+            .unwrap_or(false);
+        if has_model {
+            let models = get_model_list(config, tokens, item_id).await?;
+            occurrences.extend(model_occurrences(item_id, &item_name, &models));
+        } else if let Some(occurrence) = item_occurrence(&item) {
+            occurrences.push(occurrence);
+        }
+    }
+
+    Ok(group_stock_occurrences(occurrences))
+}
+
+async fn sync_stock_groups_with_tokens(
+    config: &ShopeeConfig,
+    tokens: &ShopeeTokens,
+    groups: &[ShopeeStockGroup],
+) -> Result<ShopeeStockSyncResult, ShopeeError> {
+    let mut result = ShopeeStockSyncResult::default();
+    for group in groups {
+        if !group.can_sync() {
+            result.skipped += group.occurrences.len();
+            continue;
+        }
+        for occurrence in &group.occurrences {
+            match update_stock(config, tokens, occurrence, group.target_stock).await {
+                Ok(()) => result.updated += 1,
+                Err(error) => result.failed.push(format!(
+                    "{} item {} model {}: {error}",
+                    group.sku, occurrence.item_id, occurrence.model_id
+                )),
+            }
+        }
+    }
+    Ok(result)
+}
+
+async fn get_all_item_ids(
+    config: &ShopeeConfig,
+    tokens: &ShopeeTokens,
+) -> Result<Vec<i64>, ShopeeError> {
+    let path = "/api/v2/product/get_item_list";
+    let mut offset = String::from("0");
+    let mut item_ids = Vec::new();
+    loop {
+        let url = signed_shop_url(
+            config,
+            tokens,
+            path,
+            &[
+                ("offset", offset.as_str()),
+                ("page_size", "50"),
+                ("item_status", "NORMAL"),
+            ],
+        );
+        let value = get_json(url).await?;
+        ensure_no_api_error(&value)?;
+        let response = value.get("response").unwrap_or(&Value::Null);
+        if let Some(items) = response.get("item").and_then(Value::as_array) {
+            item_ids.extend(
+                items
+                    .iter()
+                    .filter_map(|item| item.get("item_id").and_then(Value::as_i64)),
+            );
+        }
+        if !response
+            .get("has_next_page")
+            .and_then(Value::as_bool)
+            .unwrap_or(false)
+        {
+            break;
+        }
+        offset = response
+            .get("next_offset")
+            .and_then(Value::as_str)
+            .map(ToString::to_string)
+            .or_else(|| response.get("next_offset").map(Value::to_string))
+            .unwrap_or_else(|| item_ids.len().to_string());
+    }
+    Ok(item_ids)
+}
+
+async fn get_item_base_infos(
+    config: &ShopeeConfig,
+    tokens: &ShopeeTokens,
+    item_ids: &[i64],
+) -> Result<Vec<Value>, ShopeeError> {
+    if item_ids.is_empty() {
+        return Ok(Vec::new());
+    }
+    let path = "/api/v2/product/get_item_base_info";
+    let ids = item_ids
+        .iter()
+        .map(ToString::to_string)
+        .collect::<Vec<_>>()
+        .join(",");
+    let url = signed_shop_url(
+        config,
+        tokens,
+        path,
+        &[
+            ("item_id_list", ids.as_str()),
+            ("need_tax_info", "true"),
+            ("need_complaint_policy", "true"),
+        ],
+    );
+    let value = get_json(url).await?;
+    ensure_no_api_error(&value)?;
+    Ok(value
+        .pointer("/response/item_list")
+        .and_then(Value::as_array)
+        .cloned()
+        .unwrap_or_default())
+}
+
+async fn get_model_list(
+    config: &ShopeeConfig,
+    tokens: &ShopeeTokens,
+    item_id: i64,
+) -> Result<Value, ShopeeError> {
+    let path = "/api/v2/product/get_model_list";
+    let item_id = item_id.to_string();
+    let url = signed_shop_url(config, tokens, path, &[("item_id", item_id.as_str())]);
+    let value = get_json(url).await?;
+    ensure_no_api_error(&value)?;
+    Ok(value.get("response").cloned().unwrap_or(Value::Null))
+}
+
+async fn update_stock(
+    config: &ShopeeConfig,
+    tokens: &ShopeeTokens,
+    occurrence: &ShopeeStockOccurrence,
+    stock: i64,
+) -> Result<(), ShopeeError> {
+    let path = "/api/v2/product/update_stock";
+    let url = signed_shop_url(config, tokens, path, &[]);
+    let seller_stock = match &occurrence.location_id {
+        Some(location_id) => json!([{"location_id": location_id, "stock": stock}]),
+        None => json!([{"stock": stock}]),
+    };
+    let body = json!({
+        "item_id": occurrence.item_id,
+        "stock_list": [{
+            "model_id": occurrence.model_id,
+            "seller_stock": seller_stock
+        }]
+    });
+    let value = post_json(url, &body).await?;
+    ensure_no_api_error(&value)
+}
+
+async fn get_json(url: String) -> Result<Value, ShopeeError> {
     let response = reqwest::Client::builder()
         .timeout(Duration::from_secs(45))
         .build()
@@ -293,11 +508,23 @@ async fn get_item_list(
         .send()
         .await
         .map_err(|error| ShopeeError::Http(error.to_string()))?;
-
-    parse_item_count(response).await
+    parse_json_response(response).await
 }
 
-async fn parse_item_count(response: reqwest::Response) -> Result<usize, ShopeeError> {
+async fn post_json(url: String, body: &Value) -> Result<Value, ShopeeError> {
+    let response = reqwest::Client::builder()
+        .timeout(Duration::from_secs(45))
+        .build()
+        .map_err(|error| ShopeeError::Http(error.to_string()))?
+        .post(url)
+        .json(body)
+        .send()
+        .await
+        .map_err(|error| ShopeeError::Http(error.to_string()))?;
+    parse_json_response(response).await
+}
+
+async fn parse_json_response(response: reqwest::Response) -> Result<Value, ShopeeError> {
     let status = response.status();
     let body = response
         .text()
@@ -308,12 +535,142 @@ async fn parse_item_count(response: reqwest::Response) -> Result<usize, ShopeeEr
     }
     let value = serde_json::from_str::<Value>(&body)
         .map_err(|error| ShopeeError::Api(format!("Resposta invalida: {error}")))?;
-    ensure_no_api_error(&value)?;
-    Ok(value
-        .pointer("/response/item")
+    Ok(value)
+}
+
+fn item_occurrence(item: &Value) -> Option<ShopeeStockOccurrence> {
+    let sku = normalize_sku(item.get("item_sku").and_then(Value::as_str)?)?;
+    let item_id = item.get("item_id").and_then(Value::as_i64)?;
+    let name = item
+        .get("item_name")
+        .and_then(Value::as_str)
+        .unwrap_or("sem nome")
+        .to_string();
+    let stock = item_stock(item);
+    Some(ShopeeStockOccurrence {
+        sku,
+        item_id,
+        model_id: 0,
+        name,
+        seller_stock: stock.0,
+        available_stock: stock.1,
+        reserved_stock: stock.2,
+        location_id: stock.3,
+        multi_location: stock.4,
+    })
+}
+
+fn model_occurrences(
+    item_id: i64,
+    item_name: &str,
+    response: &Value,
+) -> Vec<ShopeeStockOccurrence> {
+    response
+        .get("model")
         .and_then(Value::as_array)
-        .map(Vec::len)
-        .unwrap_or(0))
+        .into_iter()
+        .flatten()
+        .filter_map(|model| {
+            let sku = normalize_sku(model.get("model_sku").and_then(Value::as_str)?)?;
+            let model_id = model.get("model_id").and_then(Value::as_i64)?;
+            let stock = model_stock(model);
+            Some(ShopeeStockOccurrence {
+                sku,
+                item_id,
+                model_id,
+                name: item_name.to_string(),
+                seller_stock: stock.0,
+                available_stock: stock.1,
+                reserved_stock: stock.2,
+                location_id: stock.3,
+                multi_location: stock.4,
+            })
+        })
+        .collect()
+}
+
+fn item_stock(item: &Value) -> (i64, i64, i64, Option<String>, bool) {
+    if let Some(stock_info) = item.get("stock_info_v2") {
+        stock_from_stock_info(stock_info)
+    } else {
+        (0, 0, 0, None, false)
+    }
+}
+
+fn model_stock(model: &Value) -> (i64, i64, i64, Option<String>, bool) {
+    model
+        .get("stock_info_v2")
+        .map(stock_from_stock_info)
+        .unwrap_or((0, 0, 0, None, false))
+}
+
+fn stock_from_stock_info(stock_info: &Value) -> (i64, i64, i64, Option<String>, bool) {
+    let seller_stocks = stock_info
+        .get("seller_stock")
+        .and_then(Value::as_array)
+        .cloned()
+        .unwrap_or_default();
+    let seller_stock = seller_stocks
+        .iter()
+        .filter_map(|stock| stock.get("stock").and_then(Value::as_i64))
+        .sum::<i64>();
+    let location_ids = seller_stocks
+        .iter()
+        .filter_map(|stock| stock.get("location_id").and_then(Value::as_str))
+        .filter(|location_id| !location_id.trim().is_empty())
+        .map(ToString::to_string)
+        .collect::<Vec<_>>();
+    let available = stock_info
+        .pointer("/summary_info/total_available_stock")
+        .and_then(Value::as_i64)
+        .unwrap_or(0);
+    let reserved = stock_info
+        .pointer("/summary_info/total_reserved_stock")
+        .and_then(Value::as_i64)
+        .unwrap_or(0);
+    (
+        seller_stock,
+        available,
+        reserved,
+        (location_ids.len() == 1).then(|| location_ids[0].clone()),
+        location_ids.len() > 1,
+    )
+}
+
+fn normalize_sku(value: &str) -> Option<String> {
+    let sku = value.trim().to_ascii_uppercase();
+    (!sku.is_empty()).then_some(sku)
+}
+
+pub fn group_stock_occurrences(occurrences: Vec<ShopeeStockOccurrence>) -> Vec<ShopeeStockGroup> {
+    let mut map = HashMap::<String, Vec<ShopeeStockOccurrence>>::new();
+    for occurrence in occurrences {
+        map.entry(occurrence.sku.clone())
+            .or_default()
+            .push(occurrence);
+    }
+    let mut groups = map
+        .into_iter()
+        .map(|(sku, occurrences)| {
+            let total_current_stock = occurrences
+                .iter()
+                .map(|occurrence| occurrence.seller_stock)
+                .sum::<i64>();
+            let warning = occurrences
+                .iter()
+                .any(|occurrence| occurrence.multi_location)
+                .then(|| String::from("multi-location bloqueado para sync automatico"));
+            ShopeeStockGroup {
+                sku,
+                occurrences,
+                total_current_stock,
+                target_stock: 0,
+                warning,
+            }
+        })
+        .collect::<Vec<_>>();
+    groups.sort_by(|left, right| left.sku.cmp(&right.sku));
+    groups
 }
 
 async fn parse_token_response(response: reqwest::Response) -> Result<ShopeeTokens, ShopeeError> {
@@ -327,7 +684,11 @@ async fn parse_token_response(response: reqwest::Response) -> Result<ShopeeToken
     }
     let token_response = serde_json::from_str::<TokenResponse>(&text)
         .map_err(|error| ShopeeError::Api(format!("Resposta de token invalida: {error}")))?;
-    if let Some(error) = token_response.error.as_deref().filter(|error| !error.is_empty()) {
+    if let Some(error) = token_response
+        .error
+        .as_deref()
+        .filter(|error| !error.is_empty())
+    {
         return Err(ShopeeError::Api(format!(
             "{}: {}",
             error,
@@ -444,16 +805,45 @@ fn sign(base: &str, key: &[u8]) -> String {
     hex::encode(mac.finalize().into_bytes())
 }
 
-fn signed_public_url(
-    config: &ShopeeConfig,
-    path: &str,
-    timestamp: i64,
-    sign: &str,
-) -> String {
+fn signed_public_url(config: &ShopeeConfig, path: &str, timestamp: i64, sign: &str) -> String {
     format!(
         "{}{}?partner_id={}&timestamp={}&sign={}",
         config.api_host, path, config.partner_id, timestamp, sign
     )
+}
+
+fn signed_shop_url(
+    config: &ShopeeConfig,
+    tokens: &ShopeeTokens,
+    path: &str,
+    extra_params: &[(&str, &str)],
+) -> String {
+    let timestamp = now_timestamp();
+    let sign = shop_sign(
+        config.partner_id,
+        path,
+        timestamp,
+        &tokens.access_token,
+        config.shop_id,
+        &config.partner_key,
+    );
+    let mut url = format!(
+        "{}{}?partner_id={}&timestamp={}&access_token={}&shop_id={}&sign={}",
+        config.api_host,
+        path,
+        config.partner_id,
+        timestamp,
+        percent_encode(&tokens.access_token),
+        config.shop_id,
+        sign
+    );
+    for (key, value) in extra_params {
+        url.push('&');
+        url.push_str(key);
+        url.push('=');
+        url.push_str(&percent_encode(value));
+    }
+    url
 }
 
 fn callback_addr() -> String {
@@ -646,7 +1036,11 @@ fn percent_decode(value: &str) -> String {
                 continue;
             }
         }
-        output.push(if bytes[index] == b'+' { b' ' } else { bytes[index] });
+        output.push(if bytes[index] == b'+' {
+            b' '
+        } else {
+            bytes[index]
+        });
         index += 1;
     }
     String::from_utf8_lossy(&output).to_string()
@@ -795,7 +1189,9 @@ impl std::fmt::Display for ShopeeError {
             ShopeeError::InvalidConfig(key) => write!(formatter, "{key} invalido"),
             ShopeeError::MissingTokens(hint) => write!(formatter, "tokens ausentes; {hint}"),
             ShopeeError::MissingRefreshToken => write!(formatter, "refresh_token ausente"),
-            ShopeeError::RefreshExpired => write!(formatter, "refresh_token expirado; reautorize a loja"),
+            ShopeeError::RefreshExpired => {
+                write!(formatter, "refresh_token expirado; reautorize a loja")
+            }
             ShopeeError::Http(error) => write!(formatter, "{error}"),
             ShopeeError::Api(error) => write!(formatter, "{error}"),
             ShopeeError::Env(error) => write!(formatter, "{error}"),
@@ -811,11 +1207,13 @@ mod tests {
 
     #[test]
     fn public_signature_uses_public_base_string() {
-        let sign = public_sign(100, "/api/v2/auth/access_token/get", 1_700_000_000, "secret");
-        let expected = super::sign(
-            "100/api/v2/auth/access_token/get1700000000",
-            b"secret",
+        let sign = public_sign(
+            100,
+            "/api/v2/auth/access_token/get",
+            1_700_000_000,
+            "secret",
         );
+        let expected = super::sign("100/api/v2/auth/access_token/get1700000000", b"secret");
         assert_eq!(sign, expected);
     }
 
@@ -867,7 +1265,8 @@ mod tests {
 
     #[test]
     fn callback_request_extracts_code() {
-        let request = "GET /shopee/callback?code=abc%20123&shop_id=1 HTTP/1.1\r\nHost: localhost\r\n\r\n";
+        let request =
+            "GET /shopee/callback?code=abc%20123&shop_id=1 HTTP/1.1\r\nHost: localhost\r\n\r\n";
         assert_eq!(
             extract_code_from_http_request(request),
             Some(String::from("abc 123"))
@@ -895,9 +1294,7 @@ mod tests {
             partner_key: String::from("secret"),
             shop_id: 200,
             api_host: String::from("https://partner.shopeemobile.com"),
-            redirect_url: Some(String::from(
-                "https://example.ngrok.app/shopee/callback",
-            )),
+            redirect_url: Some(String::from("https://example.ngrok.app/shopee/callback")),
         };
 
         assert_eq!(
@@ -913,14 +1310,89 @@ mod tests {
             partner_key: String::from("secret"),
             shop_id: 200,
             api_host: String::from("https://partner.shopeemobile.com"),
-            redirect_url: Some(String::from(
-                "https://example.ngrok.app/shopee/callback",
-            )),
+            redirect_url: Some(String::from("https://example.ngrok.app/shopee/callback")),
         };
         let hint = config.authorization_hint();
 
         assert!(hint.contains("https://example.ngrok.app/shopee/auth"));
         assert!(hint.contains("Redirect cadastrado"));
+    }
+
+    #[test]
+    fn groups_stock_occurrences_by_normalized_sku() {
+        let groups = group_stock_occurrences(
+            vec![
+                ShopeeStockOccurrence {
+                    sku: String::from("abc"),
+                    item_id: 1,
+                    model_id: 0,
+                    name: String::from("A"),
+                    seller_stock: 2,
+                    available_stock: 2,
+                    reserved_stock: 0,
+                    location_id: None,
+                    multi_location: false,
+                },
+                ShopeeStockOccurrence {
+                    sku: String::from("ABC"),
+                    item_id: 2,
+                    model_id: 10,
+                    name: String::from("B"),
+                    seller_stock: 3,
+                    available_stock: 3,
+                    reserved_stock: 0,
+                    location_id: None,
+                    multi_location: false,
+                },
+            ]
+            .into_iter()
+            .map(|mut occurrence| {
+                occurrence.sku = normalize_sku(&occurrence.sku).unwrap();
+                occurrence
+            })
+            .collect(),
+        );
+
+        assert_eq!(groups.len(), 1);
+        assert_eq!(groups[0].sku, "ABC");
+        assert_eq!(groups[0].total_current_stock, 5);
+        assert_eq!(groups[0].target_stock, 0);
+    }
+
+    #[test]
+    fn stock_group_toggle_switches_between_zero_and_one_hundred() {
+        let mut group = ShopeeStockGroup {
+            sku: String::from("ABC"),
+            occurrences: Vec::new(),
+            total_current_stock: 5,
+            target_stock: 0,
+            warning: None,
+        };
+
+        group.toggle_target();
+        assert_eq!(group.target_stock, 100);
+        assert_eq!(group.target_label(), "Ativar 100");
+        group.toggle_target();
+        assert_eq!(group.target_stock, 0);
+        assert_eq!(group.target_label(), "Zerar 0");
+    }
+
+    #[test]
+    fn multi_location_group_is_not_syncable() {
+        let groups = group_stock_occurrences(vec![ShopeeStockOccurrence {
+            sku: String::from("ABC"),
+            item_id: 1,
+            model_id: 0,
+            name: String::from("A"),
+            seller_stock: 2,
+            available_stock: 2,
+            reserved_stock: 0,
+            location_id: None,
+            multi_location: true,
+        }]);
+
+        assert!(!groups[0].can_sync());
+        assert!(groups[0].warning.is_some());
     }
 
     #[test]
