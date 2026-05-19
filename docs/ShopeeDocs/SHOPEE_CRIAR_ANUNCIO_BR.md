@@ -3,14 +3,11 @@
 ## Sequencia do fluxo
 
 1. Selecionar produto local do Razai.
-2. Escolher categoria Shopee.
-3. Preencher dados principais.
-4. Preencher atributos obrigatorios da categoria.
-5. Enviar imagens obrigatorias.
-6. Preencher logistica, estoque e GTIN.
-7. Preencher dados fiscais BR.
-8. Revisar payload.
-9. Publicar como `NORMAL`.
+2. Informar preco do anuncio.
+3. Enviar imagem principal definida em `SHOPEE_DEFAULT_IMAGE_PATH` ou, se ausente, a primeira imagem encontrada em `Pictures`.
+4. Criar item base como `NORMAL`.
+5. Inicializar variacoes `Cor x Tamanho`.
+6. Confirmar item/modelos pela API.
 
 ## Endpoints base
 
@@ -21,6 +18,7 @@
 - `GET /api/v2/logistics/get_channel_list`
 - `POST /api/v2/media_space/upload_image`
 - `POST /api/v2/product/add_item`
+- `POST /api/v2/product/init_tier_variation`
 
 ## Campos obrigatorios base
 
@@ -35,9 +33,24 @@
 - `condition`
 - `logistic_info`
 - `seller_stock`
-- `gtin_code`
 - `image.image_id_list`
-- `attribute_list` com todos os atributos obrigatorios da categoria
+- `tier_variation` e `model` no passo de variacoes
+
+## Padroes Razai
+
+- Categoria: `Roupas Femininas > Tecidos > Outros` (`100416`).
+- Marca: `Razai Tecidos`.
+- Condicao: `NEW`.
+- Publicacao: `NORMAL`.
+- SKU principal: SKU do tecido.
+- Variacao 1: `Cor`, usando todos os vinculos do tecido.
+- Variacao 2: `Tamanho`, iniciando em `0,5m`, `1m`, `2m`, `3m`, `4m`.
+- Limite: manter todas as cores e reduzir tamanhos para `cores x tamanhos <= 100`.
+- SKU da variacao: SKU do vinculo; se ausente, SKU do tecido.
+- Estoque por variacao: `1`.
+- Peso por variacao: `gramatura_linear_g_m * metragem / 1000`.
+- Dimensao base do item: `20 x 20 x 5 cm`.
+- Dimensao do frete por variacao: `30 x 30 x 10 cm`.
 
 ## Imagens
 
@@ -53,19 +66,21 @@
 Campos fiscais devem ser conferidos pela operacao/contabilidade antes de publicar:
 
 - `ncm`
-- `cest`
 - `same_state_cfop`
 - `diff_state_cfop`
 - `csosn`
 - `origin`
 - `measure_unit`
-- `pis`
-- `cofins`
-- `icms_cst`
-- `pis_cofins_cst`
-- `federal_state_taxes`
-- `operation_type`
-- `export_cfop`
 
-Campos opcionais como `ex_tipi`, `fci_num`, `recopi_num`, `additional_info` e `group_item_info` devem ser preenchidos quando aplicaveis.
+Padrao atual:
+
+- `ncm=55161300`
+- `origin=0`
+- `same_state_cfop=5102`
+- `diff_state_cfop=6102`
+- `csosn=102`
+- `measure_unit=M`
+- `cest=00` somente para satisfazer validacao BR quando a Shopee exigir CEST para o NCM.
+
+Campos opcionais como `ex_tipi`, `fci_num`, `recopi_num`, `additional_info`, PIS/COFINS e `group_item_info` ficam omitidos quando nao forem necessarios.
 

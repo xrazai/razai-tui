@@ -3,7 +3,7 @@ use std::{
     fs,
     io::{Read, Write},
     net::{TcpListener, TcpStream},
-    path::Path,
+    path::{Path, PathBuf},
     process::Command,
     sync::atomic::{AtomicBool, Ordering},
     thread,
@@ -18,6 +18,7 @@ use sha2::Sha256;
 use sqlx::PgPool;
 
 use crate::db;
+use crate::db::{TecidoRecord, VinculoRecord};
 
 #[cfg(windows)]
 use std::os::windows::process::CommandExt;
@@ -30,6 +31,9 @@ const ACCESS_TOKEN_EXPIRES_AT_KEY: &str = "shopee_access_token_expires_at";
 const REFRESH_TOKEN_EXPIRES_AT_KEY: &str = "shopee_refresh_token_expires_at";
 const REFRESH_WINDOW_SECONDS: i64 = 10 * 60;
 const REFRESH_TOKEN_TTL_SECONDS: i64 = 30 * 24 * 60 * 60;
+const SHOPEE_FABRIC_CATEGORY_ID: i64 = 100416;
+const SHOPEE_FABRIC_CATEGORY_LABEL: &str = "Roupas Femininas > Tecidos > Outros";
+const SHOPEE_FABRIC_NCM: &str = "55161300";
 static CALLBACK_LISTENER_STARTED: AtomicBool = AtomicBool::new(false);
 
 #[derive(Clone)]
@@ -76,6 +80,23 @@ pub struct ShopeeStockSyncResult {
     pub updated: usize,
     pub skipped: usize,
     pub failed: Vec<String>,
+}
+
+#[derive(Clone, Debug)]
+pub struct ShopeeListingResult {
+    pub item_id: i64,
+    pub sku: String,
+    pub color_count: usize,
+    pub size_count: usize,
+    pub model_count: usize,
+    pub image_id: String,
+}
+
+#[derive(Clone, Debug)]
+pub struct ShopeeListingModel {
+    pub tier_index: [usize; 2],
+    pub model_sku: String,
+    pub weight_kg: f64,
 }
 
 impl ShopeeStockGroup {
@@ -167,9 +188,27 @@ pub async fn create_listing_status(pool: Option<&PgPool>) -> String {
 }
 
 pub fn listing_guide_status() -> String {
-    String::from(
-        "Guia Shopee BR: Criar anuncio exige produto local, categoria, atributos obrigatorios, marca, logistica, preco, peso, dimensoes, estoque, GTIN, imagens e tax_info BR. Consulte docs/ShopeeDocs/SHOPEE_CRIAR_ANUNCIO_BR.md e SHOPEE_ESTOQUE_SKU.md.",
+    format!(
+        "Guia Shopee BR: Criar anuncio usa categoria {SHOPEE_FABRIC_CATEGORY_LABEL}, produto local, marca, logistica, preco, peso, dimensoes, estoque, GTIN, imagens e tax_info BR. Consulte docs/ShopeeDocs/SHOPEE_CRIAR_ANUNCIO_BR.md e SHOPEE_ESTOQUE_SKU.md.",
     )
+}
+
+pub async fn create_fabric_listing(
+    pool: Option<&PgPool>,
+    tecido: &TecidoRecord,
+    vinculos: &[VinculoRecord],
+    price: f64,
+) -> Result<ShopeeListingResult, ShopeeError> {
+    let config = ShopeeConfig::from_env()?;
+    let tokens = ensure_connected_with_config(pool, &config).await?;
+    match create_fabric_listing_with_tokens(&config, &tokens, tecido, vinculos, price).await {
+        Ok(result) => Ok(result),
+        Err(error) if error.is_token_error() => {
+            let tokens = refresh_tokens(pool, &config, &tokens).await?;
+            create_fabric_listing_with_tokens(&config, &tokens, tecido, vinculos, price).await
+        }
+        Err(error) => Err(error),
+    }
 }
 
 pub async fn fetch_online_stock_groups(
@@ -385,6 +424,106 @@ async fn sync_stock_groups_with_tokens(
     Ok(result)
 }
 
+async fn create_fabric_listing_with_tokens(
+    config: &ShopeeConfig,
+    tokens: &ShopeeTokens,
+    tecido: &TecidoRecord,
+    vinculos: &[VinculoRecord],
+    price: f64,
+) -> Result<ShopeeListingResult, ShopeeError> {
+    validate_listing_inputs(tecido, vinculos, price)?;
+    let image_path = default_listing_image_path()?;
+    let image_id = upload_image(config, &image_path).await?;
+    let logistics = listing_logistics(config, tokens).await?;
+    let colors = listing_colors(vinculos)?;
+    let sizes = listing_sizes(colors.len());
+    let models = listing_models(tecido, vinculos, &sizes)?;
+    let description = fabric_description(tecido);
+
+    let item_body = json!({
+        "item_name": listing_item_name(tecido),
+        "description": description,
+        "category_id": SHOPEE_FABRIC_CATEGORY_ID,
+        "brand": {"brand_id": 0, "original_brand_name": "Razai Tecidos"},
+        "condition": "NEW",
+        "item_status": "NORMAL",
+        "item_sku": tecido.sku,
+        "original_price": price,
+        "weight": base_weight_kg(tecido)?,
+        "dimension": {"package_height": 5, "package_width": 20, "package_length": 20},
+        "image": {"image_id_list": [image_id]},
+        "logistic_info": logistics,
+        "seller_stock": [{"stock": 1}],
+        "normal_stock": 1,
+        "attribute_list": [],
+        "item_dangerous": 0,
+        "tax_info": {
+            "ncm": SHOPEE_FABRIC_NCM,
+            "cest": "00",
+            "same_state_cfop": "5102",
+            "diff_state_cfop": "6102",
+            "csosn": "102",
+            "origin": "0",
+            "measure_unit": "M"
+        }
+    });
+    let add_value = post_json(signed_shop_url(config, tokens, "/api/v2/product/add_item", &[]), &item_body).await?;
+    ensure_no_api_error(&add_value)?;
+    let item_id = add_value
+        .pointer("/response/item_id")
+        .and_then(Value::as_i64)
+        .ok_or_else(|| ShopeeError::Api(String::from("item_id ausente ao criar anuncio")))?;
+
+    thread::sleep(Duration::from_secs(6));
+
+    let variation_body = json!({
+        "item_id": item_id,
+        "tier_variation": [
+            {
+                "name": "Cor",
+                "option_list": colors
+                    .iter()
+                    .map(|color| json!({"option": color, "image": {"image_id": image_id}}))
+                    .collect::<Vec<_>>()
+            },
+            {
+                "name": "Tamanho",
+                "option_list": sizes
+                    .iter()
+                    .map(|size| json!({"option": size.label}))
+                    .collect::<Vec<_>>()
+            }
+        ],
+        "model": models
+            .iter()
+            .map(|model| json!({
+                "tier_index": model.tier_index,
+                "original_price": price,
+                "model_sku": model.model_sku,
+                "seller_stock": [{"stock": 1}],
+                "gtin_code": "00",
+                "weight": model.weight_kg,
+                "dimension": {"package_height": 10, "package_width": 30, "package_length": 30}
+            }))
+            .collect::<Vec<_>>()
+    });
+    let tier_value = post_json(
+        signed_shop_url(config, tokens, "/api/v2/product/init_tier_variation", &[]),
+        &variation_body,
+    )
+    .await?;
+    ensure_no_api_error(&tier_value)?;
+
+    Ok(ShopeeListingResult {
+        item_id,
+        sku: tecido.sku.clone(),
+        color_count: colors.len(),
+        size_count: sizes.len(),
+        model_count: models.len(),
+        image_id,
+    })
+}
+
 async fn get_all_item_ids(
     config: &ShopeeConfig,
     tokens: &ShopeeTokens,
@@ -497,6 +636,286 @@ async fn update_stock(
     });
     let value = post_json(url, &body).await?;
     ensure_no_api_error(&value)
+}
+
+async fn listing_logistics(
+    config: &ShopeeConfig,
+    tokens: &ShopeeTokens,
+) -> Result<Vec<Value>, ShopeeError> {
+    let value = get_json(signed_shop_url(
+        config,
+        tokens,
+        "/api/v2/logistics/get_channel_list",
+        &[],
+    ))
+    .await?;
+    ensure_no_api_error(&value)?;
+    let wanted = ["Retirada", "Shopee Xpress", "Entrega Rápida", "Entrega Rapida"];
+    let channels = value
+        .pointer("/response/logistics_channel_list")
+        .and_then(Value::as_array)
+        .cloned()
+        .unwrap_or_default();
+    let mut logistics = Vec::new();
+    for channel in channels {
+        let name = channel
+            .get("logistics_channel_name")
+            .and_then(Value::as_str)
+            .unwrap_or_default();
+        if !wanted.iter().any(|wanted| name.contains(wanted)) {
+            continue;
+        }
+        if let Some(id) = channel.get("logistics_channel_id").and_then(Value::as_i64) {
+            logistics.push(json!({
+                "logistic_id": id,
+                "enabled": true,
+                "is_free": false
+            }));
+        }
+    }
+    if logistics.is_empty() {
+        return Err(ShopeeError::Api(String::from(
+            "nenhum canal de envio solicitado esta disponivel na loja",
+        )));
+    }
+    Ok(logistics)
+}
+
+async fn upload_image(config: &ShopeeConfig, path: &Path) -> Result<String, ShopeeError> {
+    let bytes = fs::read(path).map_err(|error| {
+        ShopeeError::Env(format!(
+            "falha ao ler SHOPEE_DEFAULT_IMAGE_PATH {}: {error}",
+            path.display()
+        ))
+    })?;
+    let file_name = path
+        .file_name()
+        .and_then(|name| name.to_str())
+        .unwrap_or("image.jpg")
+        .to_string();
+    let part = reqwest::multipart::Part::bytes(bytes).file_name(file_name);
+    let form = reqwest::multipart::Form::new().part("image", part);
+    let path = "/api/v2/media_space/upload_image";
+    let timestamp = now_timestamp();
+    let sign = public_sign(config.partner_id, path, timestamp, &config.partner_key);
+    let response = reqwest::Client::builder()
+        .timeout(Duration::from_secs(90))
+        .build()
+        .map_err(|error| ShopeeError::Http(error.to_string()))?
+        .post(signed_public_url(config, path, timestamp, &sign))
+        .multipart(form)
+        .send()
+        .await
+        .map_err(|error| ShopeeError::Http(error.to_string()))?;
+    let value = parse_json_response(response).await?;
+    ensure_no_api_error(&value)?;
+    value
+        .pointer("/response/image_info/image_id")
+        .and_then(Value::as_str)
+        .map(ToString::to_string)
+        .ok_or_else(|| ShopeeError::Api(String::from("image_id ausente no upload Shopee")))
+}
+
+fn default_listing_image_path() -> Result<PathBuf, ShopeeError> {
+    if let Ok(path) = std::env::var("SHOPEE_DEFAULT_IMAGE_PATH") {
+        let path = PathBuf::from(path);
+        if path.is_file() {
+            return Ok(path);
+        }
+        return Err(ShopeeError::Env(format!(
+            "SHOPEE_DEFAULT_IMAGE_PATH nao aponta para arquivo valido: {}",
+            path.display()
+        )));
+    }
+    find_first_picture().ok_or_else(|| {
+        ShopeeError::Env(String::from(
+            "configure SHOPEE_DEFAULT_IMAGE_PATH com uma imagem JPG/PNG para o anuncio",
+        ))
+    })
+}
+
+fn find_first_picture() -> Option<PathBuf> {
+    let pictures = std::env::var("USERPROFILE")
+        .ok()
+        .map(|profile| PathBuf::from(profile).join("Pictures"))?;
+    find_first_picture_in(&pictures, 0)
+}
+
+fn find_first_picture_in(path: &Path, depth: usize) -> Option<PathBuf> {
+    if depth > 3 {
+        return None;
+    }
+    let entries = fs::read_dir(path).ok()?;
+    for entry in entries.flatten() {
+        let path = entry.path();
+        if path.is_file() && is_supported_image(&path) {
+            return Some(path);
+        }
+        if path.is_dir() {
+            if let Some(found) = find_first_picture_in(&path, depth + 1) {
+                return Some(found);
+            }
+        }
+    }
+    None
+}
+
+fn is_supported_image(path: &Path) -> bool {
+    path.extension()
+        .and_then(|extension| extension.to_str())
+        .map(|extension| {
+            matches!(
+                extension.to_ascii_lowercase().as_str(),
+                "jpg" | "jpeg" | "png"
+            )
+        })
+        .unwrap_or(false)
+}
+
+#[derive(Clone, Debug)]
+struct ListingSize {
+    label: String,
+    meters: f64,
+}
+
+fn validate_listing_inputs(
+    tecido: &TecidoRecord,
+    vinculos: &[VinculoRecord],
+    price: f64,
+) -> Result<(), ShopeeError> {
+    if tecido.gramatura_linear_g_m.unwrap_or_default() <= 0 {
+        return Err(ShopeeError::Api(String::from(
+            "tecido sem gramatura linear; cadastre a gramatura antes de criar anuncio",
+        )));
+    }
+    if vinculos.is_empty() {
+        return Err(ShopeeError::Api(String::from(
+            "tecido sem vinculos de cor/estampa; crie os vinculos antes de anunciar",
+        )));
+    }
+    if vinculos.len() > 100 {
+        return Err(ShopeeError::Api(String::from(
+            "mais de 100 cores/vinculos; a Shopee permite no maximo 100 combinacoes",
+        )));
+    }
+    if price < 1.0 {
+        return Err(ShopeeError::Api(String::from(
+            "preco Shopee deve ser maior ou igual a 1,00",
+        )));
+    }
+    Ok(())
+}
+
+fn listing_item_name(tecido: &TecidoRecord) -> String {
+    let name = format!("{} Razai Tecidos", tecido.nome.trim());
+    truncate_chars(&name, 120)
+}
+
+fn fabric_description(tecido: &TecidoRecord) -> String {
+    let gramatura = tecido
+        .gramatura_linear_g_m
+        .map(|value| format!("{value} g/m linear"))
+        .unwrap_or_else(|| String::from("gramatura sob consulta"));
+    let gramatura_m2 = tecido
+        .gramatura_g_m2
+        .map(|value| format!("{value} g/m2"))
+        .unwrap_or_else(|| String::from("g/m2 sob consulta"));
+    format!(
+        "{nome} da Razai Tecidos.\n\nEspecificacoes tecnicas:\n- Composicao: {composicao}\n- Largura: {largura:.2} m\n- Gramatura: {gramatura}\n- Gramatura por area: {gramatura_m2}\n- Tipo: {tipo}\n- Acabamento: {acabamento}\n- Transparencia: {transparencia}\n- Elasticidade: {elasticidade}\n\nIndicado para confeccao, artesanato, decoracao, moda, patchwork e projetos criativos conforme a estrutura do tecido. Escolha a cor e o tamanho desejado nas variacoes do anuncio.\n\nAs cores podem variar levemente conforme tela, iluminacao e lote. Em compras de maior metragem, recomendamos adquirir a quantidade necessaria no mesmo pedido para melhor continuidade do lote.",
+        nome = tecido.nome.trim(),
+        composicao = tecido.composicao.trim(),
+        largura = tecido.largura_m,
+        tipo = tecido.tipo,
+        acabamento = tecido.acabamento,
+        transparencia = tecido.transparencia,
+        elasticidade = tecido.elasticidade,
+    )
+}
+
+fn listing_colors(vinculos: &[VinculoRecord]) -> Result<Vec<String>, ShopeeError> {
+    let mut colors = Vec::new();
+    for vinculo in vinculos {
+        let base = truncate_chars(vinculo.cor_nome.trim(), 30);
+        if !base.is_empty() {
+            let mut color = base.clone();
+            let mut suffix = 2;
+            while colors.iter().any(|existing| existing == &color) {
+                let marker = format!(" {suffix}");
+                color = format!(
+                    "{}{}",
+                    truncate_chars(&base, 30usize.saturating_sub(marker.chars().count())),
+                    marker
+                );
+                suffix += 1;
+            }
+            colors.push(color);
+        }
+    }
+    if colors.is_empty() {
+        Err(ShopeeError::Api(String::from(
+            "nenhum nome de cor/variacao valido encontrado",
+        )))
+    } else {
+        Ok(colors)
+    }
+}
+
+fn listing_sizes(color_count: usize) -> Vec<ListingSize> {
+    let max_size_count = (100 / color_count.max(1)).min(20).max(1);
+    let mut sizes = vec![ListingSize {
+        label: String::from("0,5m"),
+        meters: 0.5,
+    }];
+    let mut meter = 1.0;
+    while sizes.len() < max_size_count {
+        sizes.push(ListingSize {
+            label: format!("{}m", meter as i64),
+            meters: meter,
+        });
+        meter += 1.0;
+    }
+    sizes
+}
+
+fn listing_models(
+    tecido: &TecidoRecord,
+    vinculos: &[VinculoRecord],
+    sizes: &[ListingSize],
+) -> Result<Vec<ShopeeListingModel>, ShopeeError> {
+    let mut models = Vec::new();
+    for (color_index, vinculo) in vinculos.iter().enumerate() {
+        for (size_index, size) in sizes.iter().enumerate() {
+            models.push(ShopeeListingModel {
+                tier_index: [color_index, size_index],
+                model_sku: vinculo
+                    .sku
+                    .as_deref()
+                    .filter(|sku| !sku.trim().is_empty())
+                    .unwrap_or(&tecido.sku)
+                    .to_string(),
+                weight_kg: model_weight_kg(tecido, size.meters)?,
+            });
+        }
+    }
+    Ok(models)
+}
+
+fn base_weight_kg(tecido: &TecidoRecord) -> Result<f64, ShopeeError> {
+    model_weight_kg(tecido, 1.0)
+}
+
+fn model_weight_kg(tecido: &TecidoRecord, meters: f64) -> Result<f64, ShopeeError> {
+    let grams = tecido.gramatura_linear_g_m.unwrap_or_default() as f64 * meters;
+    if grams <= 0.0 {
+        return Err(ShopeeError::Api(String::from(
+            "gramatura linear invalida para calcular peso",
+        )));
+    }
+    Ok(((grams / 1000.0) * 1000.0).round() / 1000.0)
+}
+
+fn truncate_chars(value: &str, max_chars: usize) -> String {
+    value.chars().take(max_chars).collect()
 }
 
 async fn get_json(url: String) -> Result<Value, ShopeeError> {
@@ -1393,6 +1812,59 @@ mod tests {
 
         assert!(!groups[0].can_sync());
         assert!(groups[0].warning.is_some());
+    }
+
+    #[test]
+    fn listing_sizes_keep_color_combinations_under_one_hundred() {
+        let sizes = listing_sizes(12);
+        assert_eq!(sizes.len(), 8);
+        assert_eq!(sizes[0].label, "0,5m");
+        assert_eq!(sizes[1].label, "1m");
+        assert!(sizes.len() * 12 <= 100);
+    }
+
+    #[test]
+    fn model_weight_uses_linear_grammage_by_meterage() {
+        let tecido = test_tecido(250);
+
+        assert_eq!(model_weight_kg(&tecido, 0.5).unwrap(), 0.125);
+        assert_eq!(model_weight_kg(&tecido, 2.0).unwrap(), 0.5);
+    }
+
+    #[test]
+    fn listing_models_reuse_link_sku_for_all_sizes() {
+        let tecido = test_tecido(300);
+        let vinculos = vec![VinculoRecord {
+            cor_id: 1,
+            tecido_nome: tecido.nome.clone(),
+            cor_nome: String::from("Azul"),
+            cor_hex: None,
+            sku: Some(String::from("ANAR-AZUL")),
+        }];
+        let sizes = listing_sizes(1);
+        let models = listing_models(&tecido, &vinculos, &sizes).unwrap();
+
+        assert_eq!(models.len(), 20);
+        assert!(models.iter().all(|model| model.model_sku == "ANAR-AZUL"));
+        assert_eq!(models[0].tier_index, [0, 0]);
+        assert_eq!(models[1].tier_index, [0, 1]);
+    }
+
+    fn test_tecido(gramatura_linear_g_m: i32) -> TecidoRecord {
+        TecidoRecord {
+            id: 1,
+            nome: String::from("Anarruga"),
+            sku: String::from("ANAR"),
+            composicao: String::from("100% poliester"),
+            largura_m: 1.5,
+            rendimento_m_kg: None,
+            gramatura_linear_g_m: Some(gramatura_linear_g_m),
+            gramatura_g_m2: Some(167),
+            tipo: String::from("Liso"),
+            transparencia: String::from("Media"),
+            elasticidade: String::from("Baixa"),
+            acabamento: String::from("Fosco"),
+        }
     }
 
     #[test]
