@@ -137,7 +137,7 @@ A sincronizacao altera apenas o SKU selecionado e exige confirmacao. Itens sem v
 
 ### Criar Anuncio
 
-O fluxo de criacao seleciona um tecido local, usa a categoria `Roupas Femininas > Tecidos > Outros`, reaproveita a imagem de `SHOPEE_DEFAULT_IMAGE_PATH` ou a primeira imagem encontrada em `Pictures`, gera variacoes por cor e tamanho, calcula peso por gramatura linear e publica como `NORMAL`. Os requisitos detalhados ficam em:
+O fluxo de criacao seleciona um tecido local, usa a categoria `Roupas Femininas > Tecidos > Outros`, reaproveita a imagem de `SHOPEE_DEFAULT_IMAGE_PATH` ou a primeira imagem encontrada em `Pictures`, gera variacoes por cor e tamanho, calcula peso por gramatura linear, calcula preco por tamanho a partir do preco por metro e publica como `NORMAL`. Os requisitos detalhados ficam em:
 
 - [docs/ShopeeDocs/SHOPEE_CRIAR_ANUNCIO_BR.md](docs/ShopeeDocs/SHOPEE_CRIAR_ANUNCIO_BR.md)
 - [docs/ShopeeDocs/SHOPEE_ESTOQUE_SKU.md](docs/ShopeeDocs/SHOPEE_ESTOQUE_SKU.md)

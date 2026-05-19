@@ -3,7 +3,7 @@
 ## Sequencia do fluxo
 
 1. Selecionar produto local do Razai.
-2. Informar preco do anuncio.
+2. Informar preco por metro do anuncio.
 3. Enviar imagem principal definida em `SHOPEE_DEFAULT_IMAGE_PATH` ou, se ausente, a primeira imagem encontrada em `Pictures`.
 4. Criar item base como `NORMAL`.
 5. Inicializar variacoes `Cor x Tamanho`.
@@ -46,8 +46,10 @@
 - Variacao 1: `Cor`, usando todos os vinculos do tecido.
 - Variacao 2: `Tamanho`, iniciando em `0,5m`, `1m`, `2m`, `3m`, `4m`.
 - Limite: manter todas as cores e reduzir tamanhos para `cores x tamanhos <= 100`.
+- Limite de preco Shopee: como o preco e proporcional por metragem, cortar tamanhos quando a variacao mais cara passaria de 5x a mais barata. Com inicio em `0,5m`, o fluxo publica `0,5m`, `1m` e `2m`.
 - SKU da variacao: SKU do vinculo; se ausente, SKU do tecido.
 - Estoque por variacao: `1`.
+- Preco por variacao: `preco_por_metro * metragem`.
 - Peso por variacao: `gramatura_linear_g_m * metragem / 1000`.
 - Dimensao base do item: `20 x 20 x 5 cm`.
 - Dimensao do frete por variacao: `30 x 30 x 10 cm`.

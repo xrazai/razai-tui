@@ -34,6 +34,7 @@ const REFRESH_TOKEN_TTL_SECONDS: i64 = 30 * 24 * 60 * 60;
 const SHOPEE_FABRIC_CATEGORY_ID: i64 = 100416;
 const SHOPEE_FABRIC_CATEGORY_LABEL: &str = "Roupas Femininas > Tecidos > Outros";
 const SHOPEE_FABRIC_NCM: &str = "55161300";
+const SHOPEE_MAX_MODEL_PRICE_RATIO: f64 = 5.0;
 static CALLBACK_LISTENER_STARTED: AtomicBool = AtomicBool::new(false);
 
 #[derive(Clone)]
@@ -97,6 +98,7 @@ pub struct ShopeeListingModel {
     pub tier_index: [usize; 2],
     pub model_sku: String,
     pub weight_kg: f64,
+    pub price: f64,
 }
 
 impl ShopeeStockGroup {
@@ -197,15 +199,15 @@ pub async fn create_fabric_listing(
     pool: Option<&PgPool>,
     tecido: &TecidoRecord,
     vinculos: &[VinculoRecord],
-    price: f64,
+    meter_price: f64,
 ) -> Result<ShopeeListingResult, ShopeeError> {
     let config = ShopeeConfig::from_env()?;
     let tokens = ensure_connected_with_config(pool, &config).await?;
-    match create_fabric_listing_with_tokens(&config, &tokens, tecido, vinculos, price).await {
+    match create_fabric_listing_with_tokens(&config, &tokens, tecido, vinculos, meter_price).await {
         Ok(result) => Ok(result),
         Err(error) if error.is_token_error() => {
             let tokens = refresh_tokens(pool, &config, &tokens).await?;
-            create_fabric_listing_with_tokens(&config, &tokens, tecido, vinculos, price).await
+            create_fabric_listing_with_tokens(&config, &tokens, tecido, vinculos, meter_price).await
         }
         Err(error) => Err(error),
     }
@@ -429,15 +431,15 @@ async fn create_fabric_listing_with_tokens(
     tokens: &ShopeeTokens,
     tecido: &TecidoRecord,
     vinculos: &[VinculoRecord],
-    price: f64,
+    meter_price: f64,
 ) -> Result<ShopeeListingResult, ShopeeError> {
-    validate_listing_inputs(tecido, vinculos, price)?;
+    validate_listing_inputs(tecido, vinculos, meter_price)?;
     let image_path = default_listing_image_path()?;
     let image_id = upload_image(config, &image_path).await?;
     let logistics = listing_logistics(config, tokens).await?;
     let colors = listing_colors(vinculos)?;
     let sizes = listing_sizes(colors.len());
-    let models = listing_models(tecido, vinculos, &sizes)?;
+    let models = listing_models(tecido, vinculos, &sizes, meter_price)?;
     let description = fabric_description(tecido);
 
     let item_body = json!({
@@ -448,7 +450,10 @@ async fn create_fabric_listing_with_tokens(
         "condition": "NEW",
         "item_status": "NORMAL",
         "item_sku": tecido.sku,
-        "original_price": price,
+        "original_price": models
+            .iter()
+            .map(|model| model.price)
+            .fold(meter_price, f64::min),
         "weight": base_weight_kg(tecido)?,
         "dimension": {"package_height": 5, "package_width": 20, "package_length": 20},
         "image": {"image_id_list": [image_id]},
@@ -498,7 +503,7 @@ async fn create_fabric_listing_with_tokens(
             .iter()
             .map(|model| json!({
                 "tier_index": model.tier_index,
-                "original_price": price,
+                "original_price": model.price,
                 "model_sku": model.model_sku,
                 "seller_stock": [{"stock": 1}],
                 "gtin_code": "00",
@@ -781,7 +786,7 @@ struct ListingSize {
 fn validate_listing_inputs(
     tecido: &TecidoRecord,
     vinculos: &[VinculoRecord],
-    price: f64,
+    meter_price: f64,
 ) -> Result<(), ShopeeError> {
     if tecido.gramatura_linear_g_m.unwrap_or_default() <= 0 {
         return Err(ShopeeError::Api(String::from(
@@ -798,9 +803,9 @@ fn validate_listing_inputs(
             "mais de 100 cores/vinculos; a Shopee permite no maximo 100 combinacoes",
         )));
     }
-    if price < 1.0 {
+    if meter_price < 1.0 {
         return Err(ShopeeError::Api(String::from(
-            "preco Shopee deve ser maior ou igual a 1,00",
+            "preco por metro Shopee deve ser maior ou igual a 1,00",
         )));
     }
     Ok(())
@@ -868,6 +873,9 @@ fn listing_sizes(color_count: usize) -> Vec<ListingSize> {
     }];
     let mut meter = 1.0;
     while sizes.len() < max_size_count {
+        if meter / 0.5 > SHOPEE_MAX_MODEL_PRICE_RATIO {
+            break;
+        }
         sizes.push(ListingSize {
             label: format!("{}m", meter as i64),
             meters: meter,
@@ -881,6 +889,7 @@ fn listing_models(
     tecido: &TecidoRecord,
     vinculos: &[VinculoRecord],
     sizes: &[ListingSize],
+    meter_price: f64,
 ) -> Result<Vec<ShopeeListingModel>, ShopeeError> {
     let mut models = Vec::new();
     for (color_index, vinculo) in vinculos.iter().enumerate() {
@@ -894,10 +903,15 @@ fn listing_models(
                     .unwrap_or(&tecido.sku)
                     .to_string(),
                 weight_kg: model_weight_kg(tecido, size.meters)?,
+                price: model_price(meter_price, size.meters),
             });
         }
     }
     Ok(models)
+}
+
+fn model_price(meter_price: f64, meters: f64) -> f64 {
+    ((meter_price * meters) * 100.0).round() / 100.0
 }
 
 fn base_weight_kg(tecido: &TecidoRecord) -> Result<f64, ShopeeError> {
@@ -1817,9 +1831,10 @@ mod tests {
     #[test]
     fn listing_sizes_keep_color_combinations_under_one_hundred() {
         let sizes = listing_sizes(12);
-        assert_eq!(sizes.len(), 8);
+        assert_eq!(sizes.len(), 3);
         assert_eq!(sizes[0].label, "0,5m");
         assert_eq!(sizes[1].label, "1m");
+        assert_eq!(sizes[2].label, "2m");
         assert!(sizes.len() * 12 <= 100);
     }
 
@@ -1842,12 +1857,21 @@ mod tests {
             sku: Some(String::from("ANAR-AZUL")),
         }];
         let sizes = listing_sizes(1);
-        let models = listing_models(&tecido, &vinculos, &sizes).unwrap();
+        let models = listing_models(&tecido, &vinculos, &sizes, 20.0).unwrap();
 
-        assert_eq!(models.len(), 20);
+        assert_eq!(models.len(), 3);
         assert!(models.iter().all(|model| model.model_sku == "ANAR-AZUL"));
         assert_eq!(models[0].tier_index, [0, 0]);
         assert_eq!(models[1].tier_index, [0, 1]);
+        assert_eq!(models[0].price, 10.0);
+        assert_eq!(models[1].price, 20.0);
+        assert_eq!(models[2].price, 40.0);
+    }
+
+    #[test]
+    fn model_price_is_proportional_to_meterage() {
+        assert_eq!(model_price(19.9, 0.5), 9.95);
+        assert_eq!(model_price(19.9, 3.0), 59.7);
     }
 
     fn test_tecido(gramatura_linear_g_m: i32) -> TecidoRecord {
