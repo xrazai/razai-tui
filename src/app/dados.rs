@@ -70,17 +70,17 @@ impl App {
             KeyCode::Esc => self.voltar_dados(),
             KeyCode::Backspace => self.cor_form.backspace(),
             KeyCode::Up => self.cor_form.previous_field(),
-            KeyCode::Down | KeyCode::Enter => {
-                if self.cor_form.selected_field == CorField::Confirmar {
-                    self.confirmar_cor();
-                } else if self.cor_form.selected_field == CorField::Voltar {
-                    self.voltar_dados();
-                } else if self.cor_form.selected_field == CorField::Excluir {
-                    self.pending_delete = true;
-                } else {
-                    self.cor_form.next_field();
-                }
+            KeyCode::Down => self.cor_form.next_field(),
+            KeyCode::Enter if self.cor_form.selected_field == CorField::Confirmar => {
+                self.confirmar_cor();
             }
+            KeyCode::Enter if self.cor_form.selected_field == CorField::Voltar => {
+                self.voltar_dados();
+            }
+            KeyCode::Enter if self.cor_form.selected_field == CorField::Excluir => {
+                self.pending_delete = true;
+            }
+            KeyCode::Enter => self.cor_form.next_field(),
             KeyCode::Char(character) => self.cor_form.push(character),
             _ => {}
         }
@@ -102,17 +102,17 @@ impl App {
             KeyCode::Esc => self.voltar_dados(),
             KeyCode::Backspace => self.estampa_form.backspace(),
             KeyCode::Up => self.estampa_form.previous_field(),
-            KeyCode::Down | KeyCode::Enter => {
-                if self.estampa_form.selected_field == EstampaField::Confirmar {
-                    self.confirmar_estampa();
-                } else if self.estampa_form.selected_field == EstampaField::Voltar {
-                    self.voltar_dados();
-                } else if self.estampa_form.selected_field == EstampaField::Excluir {
-                    self.pending_delete = true;
-                } else {
-                    self.estampa_form.next_field();
-                }
+            KeyCode::Down => self.estampa_form.next_field(),
+            KeyCode::Enter if self.estampa_form.selected_field == EstampaField::Confirmar => {
+                self.confirmar_estampa();
             }
+            KeyCode::Enter if self.estampa_form.selected_field == EstampaField::Voltar => {
+                self.voltar_dados();
+            }
+            KeyCode::Enter if self.estampa_form.selected_field == EstampaField::Excluir => {
+                self.pending_delete = true;
+            }
+            KeyCode::Enter => self.estampa_form.next_field(),
             KeyCode::Char(character) => self.estampa_form.push(character),
             _ => {}
         }
