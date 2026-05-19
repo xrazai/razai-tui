@@ -4,6 +4,7 @@ use std::{
     io::{Read, Write},
     net::{TcpListener, TcpStream},
     path::Path,
+    process::Command,
     sync::atomic::{AtomicBool, Ordering},
     thread,
     time::{Duration, SystemTime, UNIX_EPOCH},
@@ -17,6 +18,9 @@ use sha2::Sha256;
 use sqlx::PgPool;
 
 use crate::db;
+
+#[cfg(windows)]
+use std::os::windows::process::CommandExt;
 
 type HmacSha256 = Hmac<Sha256>;
 
@@ -72,6 +76,38 @@ pub async fn startup_status(pool: Option<&PgPool>) -> String {
         Ok(_) => String::from("Shopee conectada"),
         Err(error) => format!("Shopee desconectada: {error}"),
     }
+}
+
+pub fn ensure_ngrok_tunnel() -> String {
+    let callback_addr = callback_addr();
+    let port = callback_addr
+        .rsplit_once(':')
+        .map(|(_, port)| port)
+        .unwrap_or("8910");
+
+    if let Some(public_url) = current_ngrok_public_url() {
+        persist_public_urls(&public_url);
+        return format!("Ngrok ativo: {public_url}");
+    }
+
+    let start_result = Command::new("ngrok")
+        .arg("http")
+        .arg(port)
+        .creation_flags(0x08000000)
+        .spawn();
+    if let Err(error) = start_result {
+        return format!("Ngrok nao iniciado automaticamente: {error}");
+    }
+
+    for _ in 0..15 {
+        thread::sleep(Duration::from_millis(500));
+        if let Some(public_url) = current_ngrok_public_url() {
+            persist_public_urls(&public_url);
+            return format!("Ngrok iniciado: {public_url}");
+        }
+    }
+
+    String::from("Ngrok iniciado, mas URL publica ainda nao foi detectada")
 }
 
 pub async fn online_stock_summary(pool: Option<&PgPool>) -> String {
@@ -130,11 +166,9 @@ pub async fn exchange_code(pool: Option<&PgPool>, code: &str) -> Result<(), Shop
 }
 
 pub fn start_callback_listener(pool: Option<PgPool>) -> Result<String, ShopeeError> {
+    dotenvy::dotenv_override().ok();
     let config = ShopeeConfig::from_env()?;
-    let addr = std::env::var("SHOPEE_CALLBACK_ADDR")
-        .ok()
-        .filter(|value| !value.trim().is_empty())
-        .unwrap_or_else(|| String::from("127.0.0.1:8910"));
+    let addr = callback_addr();
     let auth_url = authorization_url(&config);
     if CALLBACK_LISTENER_STARTED.load(Ordering::SeqCst) {
         return Ok(format!(
@@ -354,23 +388,24 @@ async fn persist_tokens(pool: Option<&PgPool>, tokens: &ShopeeTokens) -> Result<
 }
 
 fn update_dotenv(tokens: &ShopeeTokens) -> Result<(), String> {
+    let access_expires_at = tokens.access_token_expires_at.to_string();
+    let refresh_expires_at = tokens.refresh_token_expires_at.to_string();
+    update_env_key_values(&[
+        ("SHOPEE_ACCESS_TOKEN", tokens.access_token.as_str()),
+        ("SHOPEE_REFRESH_TOKEN", tokens.refresh_token.as_str()),
+        ("SHOPEE_ACCESS_TOKEN_EXPIRES_AT", &access_expires_at),
+        ("SHOPEE_REFRESH_TOKEN_EXPIRES_AT", &refresh_expires_at),
+    ])
+}
+
+fn update_env_key_values(replacements: &[(&str, &str)]) -> Result<(), String> {
     let path = Path::new(".env");
     let original = if path.exists() {
         fs::read_to_string(path).map_err(|error| format!("Falha ao ler .env: {error}"))?
     } else {
         String::new()
     };
-    let access_expires_at = tokens.access_token_expires_at.to_string();
-    let refresh_expires_at = tokens.refresh_token_expires_at.to_string();
-    let updated = update_env_contents(
-        &original,
-        &[
-            ("SHOPEE_ACCESS_TOKEN", tokens.access_token.as_str()),
-            ("SHOPEE_REFRESH_TOKEN", tokens.refresh_token.as_str()),
-            ("SHOPEE_ACCESS_TOKEN_EXPIRES_AT", &access_expires_at),
-            ("SHOPEE_REFRESH_TOKEN_EXPIRES_AT", &refresh_expires_at),
-        ],
-    );
+    let updated = update_env_contents(&original, replacements);
     fs::write(path, updated).map_err(|error| format!("Falha ao atualizar .env: {error}"))
 }
 
@@ -411,6 +446,47 @@ fn signed_public_url(
         "{}{}?partner_id={}&timestamp={}&sign={}",
         config.api_host, path, config.partner_id, timestamp, sign
     )
+}
+
+fn callback_addr() -> String {
+    std::env::var("SHOPEE_CALLBACK_ADDR")
+        .ok()
+        .filter(|value| !value.trim().is_empty())
+        .unwrap_or_else(|| String::from("127.0.0.1:8910"))
+}
+
+fn current_ngrok_public_url() -> Option<String> {
+    let response = reqwest::blocking::Client::builder()
+        .timeout(Duration::from_secs(2))
+        .build()
+        .ok()?
+        .get("http://127.0.0.1:4040/api/tunnels")
+        .send()
+        .ok()?;
+    if !response.status().is_success() {
+        return None;
+    }
+    let value = response.json::<Value>().ok()?;
+    value
+        .get("tunnels")?
+        .as_array()?
+        .iter()
+        .filter(|tunnel| tunnel.get("proto").and_then(Value::as_str) == Some("https"))
+        .find_map(|tunnel| tunnel.get("public_url").and_then(Value::as_str))
+        .map(ToString::to_string)
+}
+
+fn persist_public_urls(public_url: &str) {
+    let redirect_url = format!("{}/shopee/callback", public_url.trim_end_matches('/'));
+    let push_url = format!("{}/shopee/push", public_url.trim_end_matches('/'));
+    let _ = update_env_key_values(&[
+        ("SHOPEE_REDIRECT_URL", redirect_url.as_str()),
+        ("SHOPEE_PUSH_WEBHOOK_URL", push_url.as_str()),
+    ]);
+    unsafe {
+        std::env::set_var("SHOPEE_REDIRECT_URL", redirect_url);
+        std::env::set_var("SHOPEE_PUSH_WEBHOOK_URL", push_url);
+    }
 }
 
 fn authorization_url(config: &ShopeeConfig) -> String {
