@@ -15,7 +15,7 @@ O chat lateral usa um unico agente: **Razai Master**. A tela atual define apenas
 | `pedidos` | Lançar itens, gerar PDF, compartilhar pelo Windows e aprovar pedido como venda. |
 | `configuracoes` | Selecionar impressora de recibos. |
 | `estoque` | Consultar e movimentar estoque quando a tela for implementada. |
-| `shopee` | Apoiar rotinas relacionadas a Shopee. |
+| `shopee` | Apoiar conexao Shopee, estoque online por SKU, criacao de anuncio e requisitos BR. |
 
 ## Fluxos Guiados
 
@@ -30,6 +30,8 @@ Acoes locais ja mapeadas:
 - abrir venda por id;
 - filtrar historico por periodo;
 - selecionar impressora.
+
+Na aba Shopee, o agente deve orientar sem afirmar que executou alteracoes diretas fora dos fluxos confirmados do app. Para estoque, o fluxo visual do sistema carrega SKUs, alterna `0/100` e confirma sincronizacao do SKU selecionado. Para criacao de anuncio, a orientacao deve seguir os documentos em `docs/ShopeeDocs/`, especialmente campos obrigatorios, imagens e fiscal BR.
 
 ## Regras de Atualizacao
 
