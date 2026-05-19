@@ -1180,15 +1180,9 @@ fn build_listing_update_plan(
         ));
     }
 
-    let missing_colors = local_colors
-        .iter()
-        .filter(|color| {
-            !existing_colors
-                .iter()
-                .any(|existing| normalized_label(existing) == normalized_label(color))
-        })
-        .cloned()
-        .collect::<Vec<_>>();
+    let remote_model_skus = remote_model_skus(model_response);
+    let missing_colors =
+        missing_listing_colors(vinculos, local_colors, &existing_colors, &remote_model_skus);
     if missing_colors.is_empty() {
         return Ok(ShopeeListingUpdatePlan {
             item_id,
@@ -1369,6 +1363,57 @@ fn remote_model_price(model: &Value) -> Option<f64> {
                 .and_then(Value::as_f64)
         })
         .or_else(|| model.get("original_price").and_then(Value::as_f64))
+}
+
+fn missing_listing_colors(
+    vinculos: &[VinculoRecord],
+    local_colors: &[String],
+    existing_colors: &[String],
+    remote_model_skus: &[String],
+) -> Vec<String> {
+    vinculos
+        .iter()
+        .zip(local_colors.iter())
+        .filter(|(vinculo, color)| {
+            !listing_link_exists(vinculo, color, existing_colors, remote_model_skus)
+        })
+        .map(|(_, color)| color.clone())
+        .collect()
+}
+
+fn listing_link_exists(
+    vinculo: &VinculoRecord,
+    color: &str,
+    existing_colors: &[String],
+    remote_model_skus: &[String],
+) -> bool {
+    let sku_matches = vinculo
+        .sku
+        .as_deref()
+        .and_then(normalize_sku)
+        .is_some_and(|sku| {
+            remote_model_skus
+                .iter()
+                .any(|remote_sku| remote_sku == &sku)
+        });
+    if sku_matches {
+        return true;
+    }
+
+    existing_colors
+        .iter()
+        .any(|existing| normalized_label(existing) == normalized_label(color))
+}
+
+fn remote_model_skus(model_response: &Value) -> Vec<String> {
+    model_response
+        .get("model")
+        .and_then(Value::as_array)
+        .into_iter()
+        .flatten()
+        .filter_map(|model| model.get("model_sku").and_then(Value::as_str))
+        .filter_map(normalize_sku)
+        .collect()
 }
 
 fn normalized_label(value: &str) -> String {
@@ -2621,6 +2666,82 @@ mod tests {
             plan.tier_variation[0]["option_list"][1]["image"]["image_id"],
             json!("img1")
         );
+    }
+
+    #[test]
+    fn listing_update_compares_sku_before_color_name() {
+        let tecido = test_tecido(300);
+        let vinculos = vec![
+            test_vinculo(&tecido, 1, "Azul Local", "ANAR-AZUL"),
+            test_vinculo(&tecido, 2, "Bordo", "ANAR-BORDO"),
+        ];
+        let local_colors = listing_colors(&vinculos).unwrap();
+        let response = json!({
+            "tier_variation": [
+                {"name": "Cor", "option_list": [
+                    {"option": "Azul Shopee", "image": {"image_id": "img1"}}
+                ]},
+                {"name": "Tamanho", "option_list": [
+                    {"option": "1m"}
+                ]}
+            ],
+            "model": [
+                {"model_id": 10, "tier_index": [0, 0], "model_sku": "ANAR-AZUL", "price_info": [{"original_price": 25.0}]}
+            ]
+        });
+
+        let plan = build_listing_update_plan(
+            &tecido,
+            &vinculos,
+            &local_colors,
+            100,
+            "Anarruga",
+            "ANAR",
+            &response,
+        )
+        .unwrap();
+
+        assert_eq!(plan.missing_colors, vec![String::from("Bordo")]);
+        assert_eq!(plan.model_count, 1);
+        assert_eq!(plan.models_to_add[0]["model_sku"], json!("ANAR-BORDO"));
+    }
+
+    #[test]
+    fn listing_update_falls_back_to_color_name_when_sku_differs() {
+        let tecido = test_tecido(300);
+        let vinculos = vec![
+            test_vinculo(&tecido, 1, "Azul", "ANAR-AZUL-NOVO"),
+            test_vinculo(&tecido, 2, "Bordo", "ANAR-BORDO"),
+        ];
+        let local_colors = listing_colors(&vinculos).unwrap();
+        let response = json!({
+            "tier_variation": [
+                {"name": "Cor", "option_list": [
+                    {"option": "Azul", "image": {"image_id": "img1"}}
+                ]},
+                {"name": "Tamanho", "option_list": [
+                    {"option": "1m"}
+                ]}
+            ],
+            "model": [
+                {"model_id": 10, "tier_index": [0, 0], "model_sku": "ANAR-AZUL-ANTIGO", "price_info": [{"original_price": 25.0}]}
+            ]
+        });
+
+        let plan = build_listing_update_plan(
+            &tecido,
+            &vinculos,
+            &local_colors,
+            100,
+            "Anarruga",
+            "ANAR",
+            &response,
+        )
+        .unwrap();
+
+        assert_eq!(plan.missing_colors, vec![String::from("Bordo")]);
+        assert_eq!(plan.model_count, 1);
+        assert_eq!(plan.models_to_add[0]["model_sku"], json!("ANAR-BORDO"));
     }
 
     #[test]
