@@ -138,22 +138,24 @@ pub fn start_callback_listener(pool: Option<PgPool>) -> Result<String, ShopeeErr
     let auth_url = authorization_url(&config);
 
     thread::spawn(move || {
-        if let Ok((mut stream, _)) = listener.accept() {
-            let result = handle_callback_stream(pool.as_ref(), &mut stream);
-            let body = match result {
-                Ok(()) => "Shopee conectada. Tokens salvos. Pode voltar ao Razai TUI.",
-                Err(error) => {
-                    let message = format!("Falha ao conectar Shopee: {error}");
-                    let _ = write_http_response(&mut stream, &message);
-                    return;
+        for mut stream in listener.incoming().flatten() {
+            let body = match handle_callback_stream(pool.as_ref(), &mut stream) {
+                CallbackResult::TokenSaved => {
+                    "Shopee conectada. Tokens salvos. Pode voltar ao Razai TUI.".to_string()
+                }
+                CallbackResult::WebhookAccepted => {
+                    "Shopee webhook recebido.".to_string()
+                }
+                CallbackResult::Error(error) => {
+                    format!("Falha ao conectar Shopee: {error}")
                 }
             };
-            let _ = write_http_response(&mut stream, body);
+            let _ = write_http_response(&mut stream, &body);
         }
     });
 
     Ok(format!(
-        "Callback local aguardando em http://{addr}. Configure o ngrok para essa porta e abra: {auth_url}"
+        "Callback local ativo em http://{addr}. Push URL: /shopee/push. Redirect OAuth: /shopee/callback. Abra: {auth_url}"
     ))
 }
 
@@ -415,17 +417,38 @@ fn authorization_url(config: &ShopeeConfig) -> String {
     )
 }
 
-fn handle_callback_stream(pool: Option<&PgPool>, stream: &mut TcpStream) -> Result<(), ShopeeError> {
+enum CallbackResult {
+    TokenSaved,
+    WebhookAccepted,
+    Error(ShopeeError),
+}
+
+fn handle_callback_stream(pool: Option<&PgPool>, stream: &mut TcpStream) -> CallbackResult {
     let mut buffer = [0_u8; 4096];
-    let size = stream
-        .read(&mut buffer)
-        .map_err(|error| ShopeeError::Http(format!("falha ao ler callback: {error}")))?;
+    let size = match stream.read(&mut buffer) {
+        Ok(size) => size,
+        Err(error) => {
+            return CallbackResult::Error(ShopeeError::Http(format!(
+                "falha ao ler callback: {error}"
+            )));
+        }
+    };
     let request = String::from_utf8_lossy(&buffer[..size]);
-    let code = extract_code_from_http_request(&request)
-        .ok_or_else(|| ShopeeError::Api(String::from("callback recebido sem code")))?;
-    let runtime = tokio::runtime::Runtime::new()
-        .map_err(|error| ShopeeError::Http(format!("falha ao iniciar runtime: {error}")))?;
-    runtime.block_on(exchange_code(pool, &code))
+    let Some(code) = extract_code_from_http_request(&request) else {
+        return CallbackResult::WebhookAccepted;
+    };
+    let runtime = match tokio::runtime::Runtime::new() {
+        Ok(runtime) => runtime,
+        Err(error) => {
+            return CallbackResult::Error(ShopeeError::Http(format!(
+                "falha ao iniciar runtime: {error}"
+            )));
+        }
+    };
+    match runtime.block_on(exchange_code(pool, &code)) {
+        Ok(()) => CallbackResult::TokenSaved,
+        Err(error) => CallbackResult::Error(error),
+    }
 }
 
 fn write_http_response(stream: &mut TcpStream, body: &str) -> std::io::Result<()> {
