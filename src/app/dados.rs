@@ -1,4 +1,4 @@
-use std::{fs, path::Path};
+use std::fs;
 
 use super::App;
 use crate::{
@@ -146,8 +146,6 @@ impl App {
                 self.dados_screen = DadosScreen::VinculosMenu;
             }
             DadosScreen::VinculoDetalhe => {
-                self.vinculo_image_upload_active = false;
-                self.vinculo_image_path_input.clear();
                 self.dados_screen = DadosScreen::VinculosLista;
             }
             DadosScreen::VinculosSelecionarTecidoCriar
@@ -511,23 +509,12 @@ impl App {
             return;
         }
         self.vinculo_image_slot = VinculoImageSlot::Original;
-        self.vinculo_image_path_input.clear();
-        self.vinculo_image_upload_active = false;
         self.load_vinculo_images();
         self.dados_screen = DadosScreen::VinculoDetalhe;
     }
 
     pub(super) fn handle_vinculo_detalhe_enter(&mut self) {
-        if self.vinculo_image_upload_active {
-            self.salvar_vinculo_image_upload();
-            return;
-        }
-        self.vinculo_image_path_input.clear();
-        self.vinculo_image_upload_active = true;
-        self.db_status = format!(
-            "Cole o caminho do arquivo para {} e pressione Enter.",
-            self.vinculo_image_slot.title()
-        );
+        self.abrir_dialogo_e_salvar_vinculo_image();
     }
 
     pub(super) fn toggle_vinculo_cor(&mut self) {
@@ -650,18 +637,16 @@ impl App {
         }
     }
 
-    fn salvar_vinculo_image_upload(&mut self) {
-        let path_text = self
-            .vinculo_image_path_input
-            .trim()
-            .trim_matches('"')
-            .trim_matches('\'')
-            .to_string();
-        if path_text.is_empty() {
-            self.db_status = String::from("Informe o caminho da imagem.");
+    fn abrir_dialogo_e_salvar_vinculo_image(&mut self) {
+        let Some(path) = rfd::FileDialog::new()
+            .set_title(self.vinculo_image_slot.title())
+            .add_filter("Imagens", &["png", "jpg", "jpeg", "webp", "gif", "bmp"])
+            .pick_file()
+        else {
+            self.db_status = String::from("Selecao de imagem cancelada.");
             return;
-        }
-        let bytes = match fs::read(Path::new(&path_text)) {
+        };
+        let bytes = match fs::read(&path) {
             Ok(bytes) => bytes,
             Err(error) => {
                 self.db_status = format!("Erro ao ler imagem: {error}");
@@ -698,8 +683,6 @@ impl App {
             &bytes,
         )) {
             Ok(()) => {
-                self.vinculo_image_upload_active = false;
-                self.vinculo_image_path_input.clear();
                 self.load_vinculos(tecido_id);
                 self.load_vinculo_images();
                 self.db_status = format!("{} salva no vinculo.", slot.title());

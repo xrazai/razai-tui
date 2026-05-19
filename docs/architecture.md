@@ -50,7 +50,7 @@ Evitar arquivos com mais de 600 linhas. Se passar disso e houver um corte claro 
 
 Vinculos de tecidos lisos ficam em `tecido_cores`; vinculos de tecidos estampados ficam em `tecido_estampas`. Cada vinculo pode armazenar quatro imagens em colunas `BYTEA`: `imagem_original`, `imagem_brand`, `imagem_modelo` e `imagem_alternativa`.
 
-O fluxo de detalhe do vinculo permite colar o caminho de uma imagem local para cada slot. O app valida se o arquivo e uma imagem suportada antes de gravar no banco. A thumbnail no terminal usa `ratatui-image` com fallback halfblock, renderizando a `imagem_original` no painel lateral quando houver preview possivel.
+O fluxo de detalhe do vinculo abre a janela nativa do Windows para selecionar uma imagem local para cada slot. O app valida se o arquivo e uma imagem suportada antes de gravar no banco. A thumbnail no terminal usa `ratatui-image` com fallback halfblock, renderizando a `imagem_original` no painel lateral quando houver preview possivel.
 
 Ao atualizar os vinculos de um tecido, o app preserva os registros existentes e apenas remove os itens desmarcados; isso evita perder imagens ja cadastradas nos vinculos mantidos.
 

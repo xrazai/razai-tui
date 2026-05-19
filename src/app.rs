@@ -52,8 +52,6 @@ pub struct App {
     pub vinculo_criar_option: usize,
     pub vinculo_lista_option: usize,
     pub vinculo_image_slot: VinculoImageSlot,
-    pub vinculo_image_path_input: String,
-    pub vinculo_image_upload_active: bool,
     pub vinculo_images: VinculoImages,
     pub vinculo_thumbnail: Option<ImageProtocol>,
     pub tecidos: Vec<TecidoRecord>,
@@ -177,8 +175,6 @@ impl App {
             vinculo_criar_option: 0,
             vinculo_lista_option: 0,
             vinculo_image_slot: VinculoImageSlot::default(),
-            vinculo_image_path_input: String::new(),
-            vinculo_image_upload_active: false,
             vinculo_images: VinculoImages::default(),
             vinculo_thumbnail: None,
             tecidos,
@@ -367,27 +363,6 @@ impl App {
         }
         if self.section == Section::Configuracoes {
             self.handle_configuracoes_key(key.code);
-            return;
-        }
-
-        if self.section == Section::Dados
-            && self.dados_screen == DadosScreen::VinculoDetalhe
-            && self.vinculo_image_upload_active
-        {
-            match key.code {
-                KeyCode::Esc => {
-                    self.vinculo_image_upload_active = false;
-                    self.vinculo_image_path_input.clear();
-                }
-                KeyCode::Enter => self.handle_vinculo_detalhe_enter(),
-                KeyCode::Backspace => {
-                    self.vinculo_image_path_input.pop();
-                }
-                KeyCode::Char(character) if !character.is_control() => {
-                    self.vinculo_image_path_input.push(character);
-                }
-                _ => {}
-            }
             return;
         }
 

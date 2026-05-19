@@ -403,24 +403,14 @@ fn render_vinculo_detalhe(frame: &mut Frame, area: Rect, app: &App) {
         frame.render_widget(Paragraph::new(text), inner);
     }
 
-    if app.vinculo_image_upload_active {
-        let input_area = crate::ui::centered_rect(70, 8, area);
-        crate::ui::render_dialog_background(frame, input_area);
-        frame.render_widget(
-            Paragraph::new(format!(
-                "{}\n\n{}",
-                app.vinculo_image_slot.title(),
-                app.vinculo_image_path_input
-            ))
-            .block(
-                Block::default()
-                    .title("Caminho da imagem")
-                    .borders(Borders::ALL)
-                    .style(Style::default().bg(crate::ui::DIALOG_BG))
-                    .border_style(Style::default().fg(Color::Cyan)),
-            )
-            .style(Style::default().bg(crate::ui::DIALOG_BG)),
-            input_area,
-        );
-    }
+    frame.render_widget(
+        Paragraph::new("Enter abre a janela do Windows para selecionar a imagem.")
+            .style(Style::default().fg(Color::DarkGray)),
+        Rect {
+            x: chunks[0].x.saturating_add(2),
+            y: chunks[0].y + chunks[0].height.saturating_sub(2),
+            width: chunks[0].width.saturating_sub(4),
+            height: 1,
+        },
+    );
 }
