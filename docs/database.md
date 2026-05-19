@@ -22,7 +22,7 @@ Copie `.env.example` para `.env` e mantenha o `.env` fora do Git.
 
 O valor de `DATABASE_URL` no exemplo aponta para o Postgres local criado pelo `docker-compose.yml`. Se voce trocar usuario, senha, porta ou nome do banco no Docker, atualize tambem o `.env` local.
 
-Nao documente chaves reais de API ou senhas pessoais no README, docs ou commits. `OPENROUTER_API_KEY` deve existir apenas no `.env` local.
+Nao documente chaves reais de API ou senhas pessoais no README, docs ou commits. `OPENROUTER_API_KEY` e credenciais `SHOPEE_*` devem existir apenas no `.env` local.
 
 ## Dados
 
@@ -46,6 +46,23 @@ Configuracoes usam pares `chave`/`valor`.
 | Chave | Uso |
 | --- | --- |
 | `receipt_printer` | Nome da impressora de recibos 80mm selecionada em `Configuracoes`. |
+| `shopee_access_token` | Token de acesso Shopee vigente. |
+| `shopee_refresh_token` | Refresh token Shopee vigente. |
+| `shopee_access_token_expires_at` | Expiracao UNIX do access token. |
+| `shopee_refresh_token_expires_at` | Expiracao UNIX estimada do refresh token. |
+
+## Shopee
+
+A fonte preferencial dos tokens Shopee e a tabela `configuracoes`. O `.env` funciona como seed inicial e espelho local legivel.
+
+No startup e antes de chamadas Shopee, o app:
+
+- carrega tokens do banco;
+- usa `.env` se o banco ainda nao tiver tokens;
+- renova o access token quando estiver vencido ou perto de vencer;
+- persiste tokens renovados no banco e no `.env`.
+
+Valores reais de `SHOPEE_PARTNER_KEY`, tokens e authtokens de tunel nunca devem ser commitados.
 
 Se precisar recriar o banco do zero:
 

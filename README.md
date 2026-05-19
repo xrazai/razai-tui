@@ -35,6 +35,7 @@ Notas:
 - `.env` fica fora do Git e deve guardar valores locais/sensiveis.
 - `DATABASE_URL` ja vem configurada no `.env.example` para o Postgres do `docker-compose.yml`.
 - `OPENROUTER_API_KEY` e opcional; sem ela o chat usa respostas locais limitadas.
+- As variaveis `SHOPEE_*` habilitam a integracao Shopee. Tokens e chaves reais devem ficar apenas no `.env`.
 - Nunca coloque chaves reais, tokens ou senhas pessoais no README ou em arquivos versionados.
 
 ## Navegacao
@@ -55,7 +56,7 @@ Notas:
 - `Pedidos`: novo pedido, historico, PDF, compartilhamento nativo do Windows e aprovacao para virar venda.
 - `Dados`: cadastros e vinculos.
 - `Estoque`: reservado para estoque.
-- `Shopee`: reservado para rotinas da Shopee.
+- `Shopee`: conexao Shopee, criacao de anuncio, estoque online por SKU e guia BR.
 - `Configuracoes`: impressora de recibos.
 
 ## Dados
@@ -98,6 +99,48 @@ Pedidos usam o mesmo fluxo de lancamento de vendas, mas geram uma pendencia em v
 3. Gerar pedido.
 4. O sistema salva o pedido como `pendente`, gera um PDF em `pdf_pedidos/` e abre o compartilhamento nativo do Windows com o PDF anexado.
 5. Depois do pagamento, abra o pedido no historico e aprove para converter em venda.
+
+## Shopee
+
+A aba `Shopee` possui:
+
+1. `Criar anuncio`
+2. `Estoque Online`
+3. `Guia Shopee BR`
+
+### Conexao
+
+No startup, o app inicia o callback local, tenta detectar/iniciar o ngrok e atualiza as URLs publicas no `.env`:
+
+- `SHOPEE_REDIRECT_URL`: rota OAuth, normalmente `https://...ngrok.../shopee/callback`.
+- `SHOPEE_PUSH_WEBHOOK_URL`: rota de push/webhook, normalmente `https://...ngrok.../shopee/push`.
+
+Para conectar a loja, abra o link terminado em `/shopee/auth`. A rota `/shopee/callback` e apenas o retorno OAuth que a Shopee chama com `code`.
+
+### Estoque Online
+
+`Estoque Online` carrega os anuncios/modelos da Shopee, agrupa por SKU e exibe:
+
+- SKU;
+- quantidade de ocorrencias;
+- estoque atual somado;
+- modo selecionado para sincronizacao.
+
+Controles:
+
+- `Enter`: se ainda nao carregou, busca o estoque; se ja carregou, confirma sync do SKU selecionado.
+- `Cima/Baixo`: navega pelos SKUs carregados.
+- `Space`: alterna o SKU selecionado entre `Zerar 0` e `Ativar 100`.
+- `R`: limpa a lista carregada para recarregar no proximo `Enter`.
+
+A sincronizacao altera apenas o SKU selecionado e exige confirmacao. Itens sem variacao usam `model_id=0`. Grupos multi-location ficam bloqueados para atualizacao automatica.
+
+### Criar Anuncio
+
+O fluxo de criacao parte de produto local e deve coletar categoria, atributos obrigatorios, imagens, logistica, estoque, GTIN e dados fiscais BR antes de publicar como `NORMAL`. A implementacao atual deixa a sequencia documentada e preparada; os requisitos detalhados ficam em:
+
+- [docs/ShopeeDocs/SHOPEE_CRIAR_ANUNCIO_BR.md](docs/ShopeeDocs/SHOPEE_CRIAR_ANUNCIO_BR.md)
+- [docs/ShopeeDocs/SHOPEE_ESTOQUE_SKU.md](docs/ShopeeDocs/SHOPEE_ESTOQUE_SKU.md)
 
 ## Agente IA
 
