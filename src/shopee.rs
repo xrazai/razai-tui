@@ -169,10 +169,10 @@ pub fn start_callback_listener(pool: Option<PgPool>) -> Result<String, ShopeeErr
     dotenvy::dotenv_override().ok();
     let config = ShopeeConfig::from_env()?;
     let addr = callback_addr();
-    let auth_url = authorization_url(&config);
+    let auth_url = authorization_entry_url(&config);
     if CALLBACK_LISTENER_STARTED.load(Ordering::SeqCst) {
         return Ok(format!(
-            "Callback Shopee ja ativo em http://{addr}. Push URL: /shopee/push. Redirect OAuth: /shopee/callback. Abra: {auth_url}"
+            "Callback Shopee ja ativo em http://{addr}. Push URL: /shopee/push. Redirect OAuth: /shopee/callback. Abra para conectar: {auth_url}"
         ));
     }
     let listener = TcpListener::bind(&addr)
@@ -181,23 +181,31 @@ pub fn start_callback_listener(pool: Option<PgPool>) -> Result<String, ShopeeErr
 
     thread::spawn(move || {
         for mut stream in listener.incoming().flatten() {
-            let body = match handle_callback_stream(pool.as_ref(), &mut stream) {
+            match handle_callback_stream(pool.as_ref(), &mut stream) {
                 CallbackResult::TokenSaved => {
-                    "Shopee conectada. Tokens salvos. Pode voltar ao Razai TUI.".to_string()
+                    let _ = write_http_response(
+                        &mut stream,
+                        "Shopee conectada. Tokens salvos. Pode voltar ao Razai TUI.",
+                    );
                 }
                 CallbackResult::WebhookAccepted => {
-                    "Shopee webhook recebido.".to_string()
+                    let _ = write_http_response(&mut stream, "Shopee webhook recebido.");
+                }
+                CallbackResult::Redirect(location) => {
+                    let _ = write_http_redirect(&mut stream, &location);
                 }
                 CallbackResult::Error(error) => {
-                    format!("Falha ao conectar Shopee: {error}")
+                    let _ = write_http_response(
+                        &mut stream,
+                        &format!("Falha ao conectar Shopee: {error}"),
+                    );
                 }
-            };
-            let _ = write_http_response(&mut stream, &body);
+            }
         }
     });
 
     Ok(format!(
-        "Callback Shopee ativo em http://{addr}. Push URL: /shopee/push. Redirect OAuth: /shopee/callback. Abra: {auth_url}"
+        "Callback Shopee ativo em http://{addr}. Push URL: /shopee/push. Redirect OAuth: /shopee/callback. Abra para conectar: {auth_url}"
     ))
 }
 
@@ -505,9 +513,22 @@ fn authorization_url(config: &ShopeeConfig) -> String {
     )
 }
 
+fn authorization_entry_url(config: &ShopeeConfig) -> String {
+    config
+        .redirect_url
+        .as_deref()
+        .and_then(|redirect_url| {
+            redirect_url
+                .strip_suffix("/shopee/callback")
+                .map(|base_url| format!("{base_url}/shopee/auth"))
+        })
+        .unwrap_or_else(|| authorization_url(config))
+}
+
 enum CallbackResult {
     TokenSaved,
     WebhookAccepted,
+    Redirect(String),
     Error(ShopeeError),
 }
 
@@ -525,9 +546,15 @@ fn handle_callback_stream(pool: Option<&PgPool>, stream: &mut TcpStream) -> Call
     if is_push_request(&request) {
         return CallbackResult::WebhookAccepted;
     }
+    if is_auth_request(&request) {
+        return match ShopeeConfig::from_env() {
+            Ok(config) => CallbackResult::Redirect(authorization_url(&config)),
+            Err(error) => CallbackResult::Error(error),
+        };
+    }
     let Some(code) = extract_code_from_http_request(&request) else {
         return CallbackResult::Error(ShopeeError::Api(String::from(
-            "callback OAuth recebido sem code",
+            "callback OAuth recebido sem code; abra /shopee/auth para iniciar a autorizacao",
         )));
     };
     let runtime = match tokio::runtime::Runtime::new() {
@@ -550,9 +577,25 @@ fn is_push_request(request: &str) -> bool {
         .unwrap_or(false)
 }
 
+fn is_auth_request(request: &str) -> bool {
+    request_path(request)
+        .map(|path| path.trim_start_matches('/').starts_with("shopee/auth"))
+        .unwrap_or(false)
+}
+
 fn write_http_response(stream: &mut TcpStream, body: &str) -> std::io::Result<()> {
     let response = format!(
         "HTTP/1.1 200 OK\r\nContent-Type: text/plain; charset=utf-8\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{}",
+        body.len(),
+        body
+    );
+    stream.write_all(response.as_bytes())
+}
+
+fn write_http_redirect(stream: &mut TcpStream, location: &str) -> std::io::Result<()> {
+    let body = "Redirecionando para autorizacao Shopee.";
+    let response = format!(
+        "HTTP/1.1 302 Found\r\nLocation: {location}\r\nContent-Type: text/plain; charset=utf-8\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{}",
         body.len(),
         body
     );
@@ -833,6 +876,31 @@ mod tests {
         let request = "POST /shopee/push HTTP/1.1\r\nHost: localhost\r\n\r\n{}";
         assert!(is_push_request(request));
         assert_eq!(extract_code_from_http_request(request), None);
+    }
+
+    #[test]
+    fn auth_request_is_detected_as_authorization_entrypoint() {
+        let request = "GET /shopee/auth HTTP/1.1\r\nHost: localhost\r\n\r\n";
+        assert!(is_auth_request(request));
+        assert!(!is_push_request(request));
+    }
+
+    #[test]
+    fn authorization_entry_uses_short_public_callback_route() {
+        let config = ShopeeConfig {
+            partner_id: 100,
+            partner_key: String::from("secret"),
+            shop_id: 200,
+            api_host: String::from("https://partner.shopeemobile.com"),
+            redirect_url: Some(String::from(
+                "https://example.ngrok.app/shopee/callback",
+            )),
+        };
+
+        assert_eq!(
+            authorization_entry_url(&config),
+            "https://example.ngrok.app/shopee/auth"
+        );
     }
 
     #[test]
