@@ -28,7 +28,13 @@ pub fn render(frame: &mut Frame, area: Rect, app: &App) {
             app.pending_delete,
             app.tecido_select_dropdown,
         ),
-        DadosScreen::Cores => render_cores(frame, area, app.cor_option, &app.cores),
+        DadosScreen::Cores => render_cores(
+            frame,
+            area,
+            app.cor_option,
+            &app.cores,
+            app.color_delta_e_threshold,
+        ),
         DadosScreen::CadastrarCor => forms::render_cadastrar_cor(
             frame,
             area,
@@ -131,16 +137,32 @@ fn render_tecidos(frame: &mut Frame, area: Rect, selected: usize, tecidos: &[Tec
     frame.render_stateful_widget(list, area, &mut state);
 }
 
-fn render_cores(frame: &mut Frame, area: Rect, selected: usize, cores: &[CorRecord]) {
+fn render_cores(
+    frame: &mut Frame,
+    area: Rect,
+    selected: usize,
+    cores: &[CorRecord],
+    delta_e_threshold: f64,
+) {
     let items = std::iter::once(ListItem::new("1. [Cadastrar Cor]")).chain(
         cores.iter().enumerate().map(|(index, cor)| {
             let hex = cor.codigo_hex.as_deref().unwrap_or("#");
             let sku = cor.sku.as_deref().unwrap_or("____-__");
-            ListItem::new(Line::from(vec![
+            let conflict = nearby_colors(hex, cores, Some(cor.id), delta_e_threshold)
+                .into_iter()
+                .next();
+            let mut spans = vec![
                 Span::raw(format!("{}. {} - ", index + 2, sku)),
                 color_swatch(hex),
                 Span::raw(format!(" {} ({hex})", cor.nome)),
-            ]))
+            ];
+            if let Some(conflict) = conflict {
+                spans.push(Span::styled(
+                    format!(" * Conflito com {}", conflict.nome),
+                    Style::default().fg(Color::Red),
+                ));
+            }
+            ListItem::new(Line::from(spans))
         }),
     );
     let mut state = ListState::default().with_selected(Some(selected));
