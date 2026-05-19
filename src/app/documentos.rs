@@ -23,6 +23,8 @@ impl App {
 
         match key {
             KeyCode::Esc => self.section = Section::Dashboard,
+            KeyCode::Left => self.section = self.section.previous(),
+            KeyCode::Right => self.section = self.section.next(),
             KeyCode::Up | KeyCode::Down => self.documentos_option = 0,
             KeyCode::Enter => self.open_checklist(),
             _ => {}
@@ -35,6 +37,8 @@ impl App {
                 self.checklist_active = false;
                 self.checklist_cursor = 0;
             }
+            KeyCode::Left => self.section = self.section.previous(),
+            KeyCode::Right => self.section = self.section.next(),
             KeyCode::Up if self.checklist_len() > 0 => {
                 self.checklist_cursor =
                     (self.checklist_cursor + self.checklist_len() - 1) % self.checklist_len();
