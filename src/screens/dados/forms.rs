@@ -9,7 +9,10 @@ use ratatui::{
 use crate::{
     db::{CorRecord, EstampaRecord, TecidoRecord},
     models::*,
-    ui::{SIDE_PANEL_WIDTH, centered_rect, color_swatch, selected_style},
+    ui::{
+        DIALOG_BG, SIDE_PANEL_WIDTH, centered_rect, color_swatch, render_dialog_background,
+        selected_style,
+    },
 };
 
 pub(super) fn render_cadastrar_cor(
@@ -516,13 +519,16 @@ pub(super) fn format_tecido_action(
 
 pub(super) fn render_confirm_dialog(frame: &mut Frame, area: Rect, message: &str) {
     let popup_area = centered_rect(54, 7, area);
+    render_dialog_background(frame, popup_area);
     let dialog = Paragraph::new(format!("{message}\n\nS = confirmar   N/Esc = cancelar"))
         .block(
             Block::default()
                 .title("Confirmacao destrutiva")
                 .borders(Borders::ALL)
+                .style(Style::default().bg(DIALOG_BG))
                 .border_style(Style::default().fg(Color::Cyan)),
         )
+        .style(Style::default().bg(DIALOG_BG))
         .alignment(Alignment::Center);
 
     frame.render_widget(dialog, popup_area);

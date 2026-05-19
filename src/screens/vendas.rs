@@ -10,7 +10,10 @@ use crate::{
     app::App,
     db::{TecidoRecord, VinculoRecord},
     models::{FinalizarVendaOption, VendaField, VendaItem, VendasScreen},
-    ui::{SIDE_PANEL_WIDTH, centered_rect, color_swatch, selected_style},
+    ui::{
+        DIALOG_BG, SIDE_PANEL_WIDTH, centered_rect, color_swatch, render_dialog_background,
+        selected_style,
+    },
 };
 
 pub fn render(frame: &mut Frame, area: Rect, app: &App) {
@@ -448,6 +451,7 @@ fn render_finalizar_dialog(
     editing: bool,
 ) {
     let popup_area = centered_rect(54, 7, area);
+    render_dialog_background(frame, popup_area);
     let action = if editing { "Salvar" } else { "Finalizar" };
     let action_print = if editing {
         "Salvar e Imprimir"
@@ -491,8 +495,10 @@ fn render_finalizar_dialog(
                 "Finalizar venda"
             })
             .borders(Borders::ALL)
+            .style(Style::default().bg(DIALOG_BG))
             .border_style(Style::default().fg(Color::Cyan)),
     )
+    .style(Style::default().bg(DIALOG_BG))
     .alignment(Alignment::Center);
 
     frame.render_widget(dialog, popup_area);
@@ -500,6 +506,7 @@ fn render_finalizar_dialog(
 
 fn render_excluir_dialog(frame: &mut Frame, area: Rect) {
     let popup_area = centered_rect(48, 7, area);
+    render_dialog_background(frame, popup_area);
     let dialog = Paragraph::new(Text::from(vec![
         Line::from("Excluir esta venda?"),
         Line::from(""),
@@ -509,8 +516,10 @@ fn render_excluir_dialog(frame: &mut Frame, area: Rect) {
         Block::default()
             .title("Confirmar exclusao")
             .borders(Borders::ALL)
+            .style(Style::default().bg(DIALOG_BG))
             .border_style(Style::default().fg(Color::Red)),
     )
+    .style(Style::default().bg(DIALOG_BG))
     .alignment(Alignment::Center);
 
     frame.render_widget(dialog, popup_area);
@@ -518,6 +527,7 @@ fn render_excluir_dialog(frame: &mut Frame, area: Rect) {
 
 fn render_excluir_item_dialog(frame: &mut Frame, area: Rect) {
     let popup_area = centered_rect(48, 7, area);
+    render_dialog_background(frame, popup_area);
     let dialog = Paragraph::new(Text::from(vec![
         Line::from("Excluir este lancamento?"),
         Line::from(""),
@@ -527,8 +537,10 @@ fn render_excluir_item_dialog(frame: &mut Frame, area: Rect) {
         Block::default()
             .title("Confirmar exclusao")
             .borders(Borders::ALL)
+            .style(Style::default().bg(DIALOG_BG))
             .border_style(Style::default().fg(Color::Red)),
     )
+    .style(Style::default().bg(DIALOG_BG))
     .alignment(Alignment::Center);
 
     frame.render_widget(dialog, popup_area);

@@ -10,7 +10,7 @@ use crate::{
     app::App,
     db::{PedidoRecord, TecidoRecord, VinculoRecord},
     models::{FinalizarVendaOption, PedidosScreen, VendaField, VendaItem},
-    ui::{SIDE_PANEL_WIDTH, color_swatch, selected_style},
+    ui::{DIALOG_BG, SIDE_PANEL_WIDTH, color_swatch, render_dialog_background, selected_style},
 };
 
 pub fn render(frame: &mut Frame, area: Rect, app: &App) {
@@ -305,6 +305,7 @@ fn render_resumo(
 
 fn render_confirm_approve(frame: &mut Frame, area: Rect) {
     let popup = crate::ui::centered_rect(48, 7, area);
+    render_dialog_background(frame, popup);
     let dialog = Paragraph::new(Text::from(vec![
         Line::from("Aprovar pedido e converter em venda?"),
         Line::from(""),
@@ -314,14 +315,17 @@ fn render_confirm_approve(frame: &mut Frame, area: Rect) {
         Block::default()
             .title("Confirmar pedido")
             .borders(Borders::ALL)
+            .style(Style::default().bg(DIALOG_BG))
             .border_style(Style::default().fg(Color::Cyan)),
     )
+    .style(Style::default().bg(DIALOG_BG))
     .alignment(Alignment::Center);
     frame.render_widget(dialog, popup);
 }
 
 fn render_finalizar_pedido_dialog(frame: &mut Frame, area: Rect, selected: FinalizarVendaOption) {
     let popup_area = crate::ui::centered_rect(54, 8, area);
+    render_dialog_background(frame, popup_area);
     let options = Line::from(vec![
         Span::styled(
             "[Finalizar]",
@@ -344,8 +348,10 @@ fn render_finalizar_pedido_dialog(frame: &mut Frame, area: Rect, selected: Final
         Block::default()
             .title("Finalizar pedido")
             .borders(Borders::ALL)
+            .style(Style::default().bg(DIALOG_BG))
             .border_style(Style::default().fg(Color::Cyan)),
     )
+    .style(Style::default().bg(DIALOG_BG))
     .alignment(Alignment::Center);
     frame.render_widget(dialog, popup_area);
 }

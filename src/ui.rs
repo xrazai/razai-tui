@@ -1,12 +1,15 @@
 use ratatui::{
+    Frame,
     layout::Rect,
     style::{Color, Modifier, Style},
     text::Span,
+    widgets::{Block, Clear},
 };
 
 use crate::models::parse_hex_color;
 
 pub const SIDE_PANEL_WIDTH: u16 = 48;
+pub const DIALOG_BG: Color = Color::Rgb(10, 12, 16);
 
 pub fn selected_style(selected: bool) -> Style {
     if selected {
@@ -36,4 +39,9 @@ pub fn centered_rect(width: u16, height: u16, area: Rect) -> Rect {
         width: width.min(area.width),
         height: height.min(area.height),
     }
+}
+
+pub fn render_dialog_background(frame: &mut Frame, area: Rect) {
+    frame.render_widget(Clear, area);
+    frame.render_widget(Block::default().style(Style::default().bg(DIALOG_BG)), area);
 }
