@@ -62,6 +62,26 @@ pub fn active_context(
             capability: "dados.vinculos.imagens",
             description: "Ajuda a anexar imagens ao vinculo selecionado e conferir thumbnail no terminal.",
         },
+        (Section::Dados, DadosScreen::ListaPrecosMenu, _, _) => AgentContext {
+            capability: "dados.lista_precos.menu",
+            description: "Ajuda a escolher entre lista de precos de atacado ou varejo.",
+        },
+        (Section::Dados, DadosScreen::ListaPrecosAtacado, _, _) => AgentContext {
+            capability: "dados.lista_precos.atacado",
+            description: "Ajuda a consultar a lista de precos de atacado.",
+        },
+        (Section::Dados, DadosScreen::ListaPrecosVarejo, _, _) => AgentContext {
+            capability: "dados.lista_precos",
+            description: "Ajuda a consultar a lista de precos de varejo.",
+        },
+        (Section::Dados, DadosScreen::ListaPrecosTecido, _, _) => AgentContext {
+            capability: "dados.lista_precos.tecido",
+            description: "Ajuda a editar o preco de venda base do tecido na lista selecionada.",
+        },
+        (Section::Dados, DadosScreen::ListaPrecosVinculos, _, _) => AgentContext {
+            capability: "dados.lista_precos.vinculos",
+            description: "Ajuda a editar precos especificos de vinculos para atacado ou varejo.",
+        },
         (Section::Dados, DadosScreen::Menu, DadosOption::Tecido, _) => AgentContext {
             capability: "dados.tecidos",
             description: "Ajuda com dados de tecidos.",
@@ -77,6 +97,10 @@ pub fn active_context(
         (Section::Dados, DadosScreen::Menu, DadosOption::Vinculos, _) => AgentContext {
             capability: "dados.vinculos",
             description: "Ajuda com vinculos entre tecidos e cores ou estampas.",
+        },
+        (Section::Dados, DadosScreen::Menu, DadosOption::ListaPrecos, _) => AgentContext {
+            capability: "dados.lista_precos",
+            description: "Ajuda a consultar a lista de precos e custos cadastrados.",
         },
         (Section::Dashboard, _, _, _) => AgentContext {
             capability: "dashboard.master",

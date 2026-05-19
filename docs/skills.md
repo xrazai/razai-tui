@@ -12,6 +12,7 @@ O chat lateral usa um unico agente: **Razai Master**. A tela atual define apenas
 | `dados.estampas` | Criar e consultar estampas com SKU automatico. |
 | `dados.vinculos` | Criar e consultar vinculos entre tecido e cor/estampa. |
 | `dados.vinculos.imagens` | Orientar o upload local das quatro imagens de um vinculo, atalhos produtivos, progresso `[n/4]` e leitura do thumbnail no terminal. |
+| `dados.lista_precos` | Consultar e editar precos de venda de atacado/varejo por tecido e excecoes por vinculo. |
 | `vendas` | Lançar itens, consultar historico, filtrar periodo e abrir venda por id. |
 | `pedidos` | Lançar itens, gerar PDF, compartilhar pelo Windows e aprovar pedido como venda. |
 | `documentos` | Orientar a emissao de documentos operacionais, como checklist PDF de vinculos por tecido. |

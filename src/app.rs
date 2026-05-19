@@ -62,6 +62,15 @@ pub struct App {
     pub vinculo_tecido_option: usize,
     pub vinculo_criar_option: usize,
     pub vinculo_lista_option: usize,
+    pub lista_precos_option: usize,
+    pub lista_precos_tipo: ListaPrecoTipo,
+    pub lista_precos_tecido_option: usize,
+    pub lista_precos_tecido_detail_option: usize,
+    pub lista_precos_vinculo_option: usize,
+    pub lista_precos_tecido_input: String,
+    pub lista_precos_vinculo_input: String,
+    pub editing_lista_preco_tecido: bool,
+    pub editing_lista_preco_vinculo: bool,
     pub vinculo_detalhe_option: VinculoDetalheOption,
     pub vinculo_image_slot: VinculoImageSlot,
     pub vinculo_images: VinculoImages,
@@ -196,6 +205,15 @@ impl App {
             vinculo_tecido_option: 0,
             vinculo_criar_option: 0,
             vinculo_lista_option: 0,
+            lista_precos_option: 0,
+            lista_precos_tipo: ListaPrecoTipo::Atacado,
+            lista_precos_tecido_option: 0,
+            lista_precos_tecido_detail_option: 0,
+            lista_precos_vinculo_option: 0,
+            lista_precos_tecido_input: String::new(),
+            lista_precos_vinculo_input: String::new(),
+            editing_lista_preco_tecido: false,
+            editing_lista_preco_vinculo: false,
             vinculo_detalhe_option: VinculoDetalheOption::default(),
             vinculo_image_slot: VinculoImageSlot::default(),
             vinculo_images: VinculoImages::default(),
@@ -363,6 +381,17 @@ impl App {
             return;
         }
 
+        if self.section == Section::Dados
+            && matches!(
+                self.dados_screen,
+                DadosScreen::ListaPrecosTecido | DadosScreen::ListaPrecosVinculos
+            )
+            && (self.editing_lista_preco_tecido || self.editing_lista_preco_vinculo)
+        {
+            self.handle_lista_precos_edit_key(key.code);
+            return;
+        }
+
         if matches!(key.code, KeyCode::Tab | KeyCode::BackTab) {
             self.handle_focus_tab(key.code);
             return;
@@ -459,6 +488,12 @@ impl App {
                 DadosScreen::VinculosSelecionarCores => self.previous_vinculo_criar_option(),
                 DadosScreen::VinculosLista => self.previous_vinculo_lista(),
                 DadosScreen::VinculoDetalhe => self.previous_vinculo_image_slot(),
+                DadosScreen::ListaPrecosMenu => self.previous_lista_precos_option(),
+                DadosScreen::ListaPrecosAtacado | DadosScreen::ListaPrecosVarejo => {
+                    self.previous_lista_precos_tecido()
+                }
+                DadosScreen::ListaPrecosTecido => self.previous_lista_precos_tecido_detail_option(),
+                DadosScreen::ListaPrecosVinculos => self.previous_lista_precos_vinculo(),
                 DadosScreen::CadastrarTecido
                 | DadosScreen::CadastrarCor
                 | DadosScreen::CadastrarEstampa => {}
@@ -474,6 +509,12 @@ impl App {
                 DadosScreen::VinculosSelecionarCores => self.next_vinculo_criar_option(),
                 DadosScreen::VinculosLista => self.next_vinculo_lista(),
                 DadosScreen::VinculoDetalhe => self.next_vinculo_image_slot(),
+                DadosScreen::ListaPrecosMenu => self.next_lista_precos_option(),
+                DadosScreen::ListaPrecosAtacado | DadosScreen::ListaPrecosVarejo => {
+                    self.next_lista_precos_tecido()
+                }
+                DadosScreen::ListaPrecosTecido => self.next_lista_precos_tecido_detail_option(),
+                DadosScreen::ListaPrecosVinculos => self.next_lista_precos_vinculo(),
                 DadosScreen::CadastrarTecido
                 | DadosScreen::CadastrarCor
                 | DadosScreen::CadastrarEstampa => {}
@@ -496,6 +537,10 @@ impl App {
                         DadosOption::Vinculos => {
                             self.dados_screen = DadosScreen::VinculosMenu;
                             self.vinculo_menu_option = 0;
+                        }
+                        DadosOption::ListaPrecos => {
+                            self.dados_screen = DadosScreen::ListaPrecosMenu;
+                            self.lista_precos_option = 0;
                         }
                     }
                 } else if self.dados_screen == DadosScreen::Tecidos {
@@ -533,6 +578,24 @@ impl App {
                     self.open_vinculo_detalhe();
                 } else if self.dados_screen == DadosScreen::VinculoDetalhe {
                     self.handle_vinculo_detalhe_enter();
+                } else if self.dados_screen == DadosScreen::ListaPrecosMenu {
+                    if self.lista_precos_option == 0 {
+                        self.lista_precos_tipo = ListaPrecoTipo::Atacado;
+                        self.dados_screen = DadosScreen::ListaPrecosAtacado;
+                    } else {
+                        self.lista_precos_tipo = ListaPrecoTipo::Varejo;
+                        self.dados_screen = DadosScreen::ListaPrecosVarejo;
+                    }
+                    self.lista_precos_tecido_option = 0;
+                } else if matches!(
+                    self.dados_screen,
+                    DadosScreen::ListaPrecosAtacado | DadosScreen::ListaPrecosVarejo
+                ) {
+                    self.open_lista_precos_tecido();
+                } else if self.dados_screen == DadosScreen::ListaPrecosTecido {
+                    self.handle_lista_precos_tecido_enter();
+                } else if self.dados_screen == DadosScreen::ListaPrecosVinculos {
+                    self.handle_lista_precos_vinculo_enter();
                 }
             }
             KeyCode::Char(' ') if self.dados_screen == DadosScreen::VinculosSelecionarCores => {

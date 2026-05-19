@@ -6,8 +6,8 @@ pub use orders::*;
 pub use sales::*;
 
 use crate::models::{
-    ACABAMENTO_OPTIONS, NIVEL_OPTIONS, TIPO_OPTIONS, TecidoForm, parse_largura_m, parse_number,
-    round_to_nearest_ten,
+    ACABAMENTO_OPTIONS, ListaPrecoTipo, NIVEL_OPTIONS, TIPO_OPTIONS, TecidoForm, parse_largura_m,
+    parse_number, round_to_nearest_ten,
 };
 
 pub async fn connect() -> Result<PgPool, sqlx::Error> {
@@ -48,6 +48,12 @@ pub async fn ensure_configuracoes_table(pool: &PgPool) -> Result<(), sqlx::Error
 
 pub async fn ensure_tecido_custo_base_column(pool: &PgPool) -> Result<(), sqlx::Error> {
     sqlx::query("ALTER TABLE tecidos ADD COLUMN IF NOT EXISTS custo_base NUMERIC(12, 2)")
+        .execute(pool)
+        .await?;
+    sqlx::query("ALTER TABLE tecidos ADD COLUMN IF NOT EXISTS preco_atacado NUMERIC(12, 2)")
+        .execute(pool)
+        .await?;
+    sqlx::query("ALTER TABLE tecidos ADD COLUMN IF NOT EXISTS preco_varejo NUMERIC(12, 2)")
         .execute(pool)
         .await?;
 
@@ -199,6 +205,16 @@ pub async fn ensure_vinculo_image_columns(pool: &PgPool) -> Result<(), sqlx::Err
         ))
         .execute(pool)
         .await?;
+        sqlx::query(&format!(
+            "ALTER TABLE {table} ADD COLUMN IF NOT EXISTS preco_atacado_override NUMERIC(12, 2)"
+        ))
+        .execute(pool)
+        .await?;
+        sqlx::query(&format!(
+            "ALTER TABLE {table} ADD COLUMN IF NOT EXISTS preco_varejo_override NUMERIC(12, 2)"
+        ))
+        .execute(pool)
+        .await?;
     }
 
     Ok(())
@@ -238,6 +254,10 @@ pub struct TecidoRecord {
     pub composicao: String,
     pub largura_m: f64,
     pub custo_base: Option<f64>,
+    pub preco_atacado: Option<f64>,
+    pub preco_varejo: Option<f64>,
+    pub preco_atacado_override_count: i64,
+    pub preco_varejo_override_count: i64,
     pub rendimento_m_kg: Option<f64>,
     pub gramatura_linear_g_m: Option<i32>,
     pub gramatura_g_m2: Option<i32>,
@@ -272,6 +292,12 @@ pub struct VinculoRecord {
     pub tecido_custo_base: Option<f64>,
     pub custo_override: Option<f64>,
     pub custo_efetivo: Option<f64>,
+    pub tecido_preco_atacado: Option<f64>,
+    pub tecido_preco_varejo: Option<f64>,
+    pub preco_atacado_override: Option<f64>,
+    pub preco_varejo_override: Option<f64>,
+    pub preco_atacado_efetivo: Option<f64>,
+    pub preco_varejo_efetivo: Option<f64>,
     pub has_imagem_original: bool,
     pub has_imagem_brand: bool,
     pub has_imagem_modelo: bool,
@@ -296,6 +322,22 @@ pub async fn list_tecidos(pool: &PgPool) -> Result<Vec<TecidoRecord>, sqlx::Erro
             composicao,
             largura_m::float8 AS largura_m,
             custo_base::float8 AS custo_base,
+            preco_atacado::float8 AS preco_atacado,
+            preco_varejo::float8 AS preco_varejo,
+            (
+                SELECT COUNT(*) FROM tecido_cores tc
+                WHERE tc.tecido_id = tecidos.id AND tc.ativo = TRUE AND tc.preco_atacado_override IS NOT NULL
+            ) + (
+                SELECT COUNT(*) FROM tecido_estampas te
+                WHERE te.tecido_id = tecidos.id AND te.ativo = TRUE AND te.preco_atacado_override IS NOT NULL
+            ) AS preco_atacado_override_count,
+            (
+                SELECT COUNT(*) FROM tecido_cores tc
+                WHERE tc.tecido_id = tecidos.id AND tc.ativo = TRUE AND tc.preco_varejo_override IS NOT NULL
+            ) + (
+                SELECT COUNT(*) FROM tecido_estampas te
+                WHERE te.tecido_id = tecidos.id AND te.ativo = TRUE AND te.preco_varejo_override IS NOT NULL
+            ) AS preco_varejo_override_count,
             rendimento_m_kg::float8 AS rendimento_m_kg,
             gramatura_linear_g_m,
             gramatura_g_m2,
@@ -319,6 +361,10 @@ pub async fn list_tecidos(pool: &PgPool) -> Result<Vec<TecidoRecord>, sqlx::Erro
             composicao: row.get("composicao"),
             largura_m: row.get("largura_m"),
             custo_base: row.get("custo_base"),
+            preco_atacado: row.get("preco_atacado"),
+            preco_varejo: row.get("preco_varejo"),
+            preco_atacado_override_count: row.get("preco_atacado_override_count"),
+            preco_varejo_override_count: row.get("preco_varejo_override_count"),
             rendimento_m_kg: row.get("rendimento_m_kg"),
             gramatura_linear_g_m: row.get("gramatura_linear_g_m"),
             gramatura_g_m2: row.get("gramatura_g_m2"),
@@ -559,6 +605,12 @@ pub async fn list_vinculos_by_tecido(
             t.custo_base::float8 AS tecido_custo_base,
             tc.custo_override::float8 AS custo_override,
             COALESCE(tc.custo_override, t.custo_base)::float8 AS custo_efetivo,
+            t.preco_atacado::float8 AS tecido_preco_atacado,
+            t.preco_varejo::float8 AS tecido_preco_varejo,
+            tc.preco_atacado_override::float8 AS preco_atacado_override,
+            tc.preco_varejo_override::float8 AS preco_varejo_override,
+            COALESCE(tc.preco_atacado_override, t.preco_atacado)::float8 AS preco_atacado_efetivo,
+            COALESCE(tc.preco_varejo_override, t.preco_varejo)::float8 AS preco_varejo_efetivo,
             tc.imagem_original IS NOT NULL AS has_imagem_original,
             tc.imagem_brand IS NOT NULL AS has_imagem_brand,
             tc.imagem_modelo IS NOT NULL AS has_imagem_modelo,
@@ -585,6 +637,12 @@ pub async fn list_vinculos_by_tecido(
             tecido_custo_base: row.get("tecido_custo_base"),
             custo_override: row.get("custo_override"),
             custo_efetivo: row.get("custo_efetivo"),
+            tecido_preco_atacado: row.get("tecido_preco_atacado"),
+            tecido_preco_varejo: row.get("tecido_preco_varejo"),
+            preco_atacado_override: row.get("preco_atacado_override"),
+            preco_varejo_override: row.get("preco_varejo_override"),
+            preco_atacado_efetivo: row.get("preco_atacado_efetivo"),
+            preco_varejo_efetivo: row.get("preco_varejo_efetivo"),
             has_imagem_original: row.get("has_imagem_original"),
             has_imagem_brand: row.get("has_imagem_brand"),
             has_imagem_modelo: row.get("has_imagem_modelo"),
@@ -608,6 +666,12 @@ pub async fn list_estampa_vinculos_by_tecido(
             t.custo_base::float8 AS tecido_custo_base,
             te.custo_override::float8 AS custo_override,
             COALESCE(te.custo_override, t.custo_base)::float8 AS custo_efetivo,
+            t.preco_atacado::float8 AS tecido_preco_atacado,
+            t.preco_varejo::float8 AS tecido_preco_varejo,
+            te.preco_atacado_override::float8 AS preco_atacado_override,
+            te.preco_varejo_override::float8 AS preco_varejo_override,
+            COALESCE(te.preco_atacado_override, t.preco_atacado)::float8 AS preco_atacado_efetivo,
+            COALESCE(te.preco_varejo_override, t.preco_varejo)::float8 AS preco_varejo_efetivo,
             te.imagem_original IS NOT NULL AS has_imagem_original,
             te.imagem_brand IS NOT NULL AS has_imagem_brand,
             te.imagem_modelo IS NOT NULL AS has_imagem_modelo,
@@ -634,6 +698,12 @@ pub async fn list_estampa_vinculos_by_tecido(
             tecido_custo_base: row.get("tecido_custo_base"),
             custo_override: row.get("custo_override"),
             custo_efetivo: row.get("custo_efetivo"),
+            tecido_preco_atacado: row.get("tecido_preco_atacado"),
+            tecido_preco_varejo: row.get("tecido_preco_varejo"),
+            preco_atacado_override: row.get("preco_atacado_override"),
+            preco_varejo_override: row.get("preco_varejo_override"),
+            preco_atacado_efetivo: row.get("preco_atacado_efetivo"),
+            preco_varejo_efetivo: row.get("preco_varejo_efetivo"),
             has_imagem_original: row.get("has_imagem_original"),
             has_imagem_brand: row.get("has_imagem_brand"),
             has_imagem_modelo: row.get("has_imagem_modelo"),
@@ -727,6 +797,59 @@ pub async fn update_vinculo_custo_override(
         "UPDATE {table} SET custo_override = $1::numeric WHERE tecido_id = $2 AND {item_column} = $3"
     ))
     .bind(custo_override)
+    .bind(tecido_id)
+    .bind(item_id)
+    .execute(pool)
+    .await?;
+
+    Ok(())
+}
+
+pub async fn update_tecido_preco_venda(
+    pool: &PgPool,
+    tecido_id: i64,
+    tipo: ListaPrecoTipo,
+    preco: Option<f64>,
+) -> Result<(), sqlx::Error> {
+    let column = match tipo {
+        ListaPrecoTipo::Atacado => "preco_atacado",
+        ListaPrecoTipo::Varejo => "preco_varejo",
+    };
+
+    sqlx::query(&format!(
+        "UPDATE tecidos SET {column} = $1::numeric WHERE id = $2"
+    ))
+    .bind(preco)
+    .bind(tecido_id)
+    .execute(pool)
+    .await?;
+
+    Ok(())
+}
+
+pub async fn update_vinculo_preco_override(
+    pool: &PgPool,
+    tecido_id: i64,
+    item_id: i64,
+    usa_estampas: bool,
+    tipo: ListaPrecoTipo,
+    preco_override: Option<f64>,
+) -> Result<(), sqlx::Error> {
+    let table = if usa_estampas {
+        "tecido_estampas"
+    } else {
+        "tecido_cores"
+    };
+    let item_column = if usa_estampas { "estampa_id" } else { "cor_id" };
+    let price_column = match tipo {
+        ListaPrecoTipo::Atacado => "preco_atacado_override",
+        ListaPrecoTipo::Varejo => "preco_varejo_override",
+    };
+
+    sqlx::query(&format!(
+        "UPDATE {table} SET {price_column} = $1::numeric WHERE tecido_id = $2 AND {item_column} = $3"
+    ))
+    .bind(preco_override)
     .bind(tecido_id)
     .bind(item_id)
     .execute(pool)

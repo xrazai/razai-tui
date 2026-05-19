@@ -104,6 +104,27 @@ pub enum DadosScreen {
     VinculosSelecionarCores,
     VinculosLista,
     VinculoDetalhe,
+    ListaPrecosMenu,
+    ListaPrecosAtacado,
+    ListaPrecosVarejo,
+    ListaPrecosTecido,
+    ListaPrecosVinculos,
+}
+
+#[derive(Clone, Copy, Default, Eq, PartialEq)]
+pub enum ListaPrecoTipo {
+    #[default]
+    Atacado,
+    Varejo,
+}
+
+impl ListaPrecoTipo {
+    pub fn title(self) -> &'static str {
+        match self {
+            Self::Atacado => "Atacado",
+            Self::Varejo => "Varejo",
+        }
+    }
 }
 
 #[derive(Clone, Copy, Default, Eq, Hash, PartialEq)]
@@ -666,14 +687,16 @@ pub enum DadosOption {
     Cores,
     Estampas,
     Vinculos,
+    ListaPrecos,
 }
 
 impl DadosOption {
-    pub const ALL: [DadosOption; 4] = [
+    pub const ALL: [DadosOption; 5] = [
         DadosOption::Tecido,
         DadosOption::Cores,
         DadosOption::Estampas,
         DadosOption::Vinculos,
+        DadosOption::ListaPrecos,
     ];
 
     pub fn title(self) -> &'static str {
@@ -682,6 +705,7 @@ impl DadosOption {
             DadosOption::Cores => "Cores",
             DadosOption::Estampas => "Estampas",
             DadosOption::Vinculos => "Vinculos",
+            DadosOption::ListaPrecos => "Lista de Precos",
         }
     }
 

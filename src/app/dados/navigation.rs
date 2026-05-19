@@ -91,4 +91,50 @@ impl App {
                 (self.vinculo_lista_option + self.vinculos.len() - 1) % self.vinculos.len();
         }
     }
+
+    pub(in crate::app) fn next_lista_precos_option(&mut self) {
+        self.lista_precos_option = (self.lista_precos_option + 1) % 2;
+    }
+
+    pub(in crate::app) fn previous_lista_precos_option(&mut self) {
+        self.lista_precos_option = (self.lista_precos_option + 1) % 2;
+    }
+
+    pub(in crate::app) fn next_lista_precos_tecido(&mut self) {
+        if !self.tecidos.is_empty() {
+            self.lista_precos_tecido_option =
+                (self.lista_precos_tecido_option + 1) % self.tecidos.len();
+        }
+    }
+
+    pub(in crate::app) fn previous_lista_precos_tecido(&mut self) {
+        if !self.tecidos.is_empty() {
+            self.lista_precos_tecido_option =
+                (self.lista_precos_tecido_option + self.tecidos.len() - 1) % self.tecidos.len();
+        }
+    }
+
+    pub(in crate::app) fn next_lista_precos_tecido_detail_option(&mut self) {
+        self.lista_precos_tecido_detail_option = (self.lista_precos_tecido_detail_option + 1) % 3;
+    }
+
+    pub(in crate::app) fn previous_lista_precos_tecido_detail_option(&mut self) {
+        self.lista_precos_tecido_detail_option = (self.lista_precos_tecido_detail_option + 2) % 3;
+    }
+
+    pub(in crate::app) fn next_lista_precos_vinculo(&mut self) {
+        if !self.vinculos.is_empty() {
+            self.lista_precos_vinculo_option =
+                (self.lista_precos_vinculo_option + 1) % self.vinculos.len();
+            self.refresh_lista_precos_vinculo_input();
+        }
+    }
+
+    pub(in crate::app) fn previous_lista_precos_vinculo(&mut self) {
+        if !self.vinculos.is_empty() {
+            self.lista_precos_vinculo_option =
+                (self.lista_precos_vinculo_option + self.vinculos.len() - 1) % self.vinculos.len();
+            self.refresh_lista_precos_vinculo_input();
+        }
+    }
 }

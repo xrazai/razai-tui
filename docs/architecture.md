@@ -48,7 +48,7 @@ Evitar arquivos com mais de 600 linhas. Se passar disso e houver um corte claro 
 
 ## Vinculos e Imagens
 
-Vinculos de tecidos lisos ficam em `tecido_cores`; vinculos de tecidos estampados ficam em `tecido_estampas`. Cada vinculo pode armazenar quatro imagens em colunas `BYTEA`: `imagem_original`, `imagem_brand`, `imagem_modelo` e `imagem_alternativa`. O custo padrao vem de `tecidos.custo_base`; quando uma cor ou estampa tiver custo diferente, o vinculo grava `custo_override` e passa a usar esse valor efetivo.
+Vinculos de tecidos lisos ficam em `tecido_cores`; vinculos de tecidos estampados ficam em `tecido_estampas`. Cada vinculo pode armazenar quatro imagens em colunas `BYTEA`: `imagem_original`, `imagem_brand`, `imagem_modelo` e `imagem_alternativa`. O custo padrao vem de `tecidos.custo_base`; quando uma cor ou estampa tiver custo diferente, o vinculo grava `custo_override` e passa a usar esse valor efetivo. Precos de venda ficam separados: `tecidos.preco_atacado` e `tecidos.preco_varejo` sao os valores base por tecido, enquanto `preco_atacado_override` e `preco_varejo_override` nos vinculos registram excecoes.
 
 O fluxo de detalhe do vinculo abre a janela nativa do Windows para selecionar uma imagem local para cada slot. O app valida se o arquivo e uma imagem suportada antes de gravar no banco e tenta detectar leituras incompletas, principalmente em arquivos vindos de Google Drive/Drives compartilhados ainda nao sincronizados.
 

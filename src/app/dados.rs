@@ -152,6 +152,20 @@ impl App {
             DadosScreen::VinculosSelecionarCores | DadosScreen::VinculosLista => {
                 self.dados_screen = DadosScreen::VinculosMenu;
             }
+            DadosScreen::ListaPrecosAtacado | DadosScreen::ListaPrecosVarejo => {
+                self.dados_screen = DadosScreen::ListaPrecosMenu;
+            }
+            DadosScreen::ListaPrecosTecido => {
+                self.editing_lista_preco_tecido = false;
+                self.dados_screen = match self.lista_precos_tipo {
+                    ListaPrecoTipo::Atacado => DadosScreen::ListaPrecosAtacado,
+                    ListaPrecoTipo::Varejo => DadosScreen::ListaPrecosVarejo,
+                };
+            }
+            DadosScreen::ListaPrecosVinculos => {
+                self.editing_lista_preco_vinculo = false;
+                self.dados_screen = DadosScreen::ListaPrecosTecido;
+            }
             DadosScreen::VinculoDetalhe => {
                 self.pending_unlink_vinculo = false;
                 self.dados_screen = DadosScreen::VinculosLista;
@@ -163,7 +177,8 @@ impl App {
             DadosScreen::Tecidos
             | DadosScreen::Cores
             | DadosScreen::Estampas
-            | DadosScreen::VinculosMenu => {
+            | DadosScreen::VinculosMenu
+            | DadosScreen::ListaPrecosMenu => {
                 self.dados_screen = DadosScreen::Menu;
             }
             DadosScreen::Menu => {
@@ -524,6 +539,210 @@ impl App {
         self.refresh_vinculo_custo_input();
         self.load_vinculo_images();
         self.dados_screen = DadosScreen::VinculoDetalhe;
+    }
+
+    pub(super) fn open_lista_precos_tecido(&mut self) {
+        if self.tecidos.is_empty() {
+            return;
+        }
+        self.lista_precos_tecido_detail_option = 0;
+        self.editing_lista_preco_tecido = true;
+        self.refresh_lista_precos_tecido_input();
+        self.db_status = format!(
+            "Editando preco {} do tecido. Enter salva.",
+            self.lista_precos_tipo.title()
+        );
+        self.dados_screen = DadosScreen::ListaPrecosTecido;
+    }
+
+    pub(super) fn handle_lista_precos_tecido_enter(&mut self) {
+        match self.lista_precos_tecido_detail_option {
+            0 => {
+                if self.editing_lista_preco_tecido {
+                    self.salvar_lista_preco_tecido();
+                } else {
+                    self.editing_lista_preco_tecido = true;
+                    self.refresh_lista_precos_tecido_input();
+                }
+            }
+            1 => self.open_lista_precos_vinculos(),
+            _ => self.voltar_dados(),
+        }
+    }
+
+    pub(super) fn handle_lista_precos_vinculo_enter(&mut self) {
+        if self.vinculos.is_empty() {
+            return;
+        }
+        if self.editing_lista_preco_vinculo {
+            self.salvar_lista_preco_vinculo();
+        } else {
+            self.editing_lista_preco_vinculo = true;
+            self.refresh_lista_precos_vinculo_input();
+        }
+    }
+
+    pub(super) fn handle_lista_precos_edit_key(&mut self, key: KeyCode) {
+        match key {
+            KeyCode::Enter if self.editing_lista_preco_tecido => self.salvar_lista_preco_tecido(),
+            KeyCode::Enter if self.editing_lista_preco_vinculo => self.salvar_lista_preco_vinculo(),
+            KeyCode::Esc if self.editing_lista_preco_tecido => {
+                self.editing_lista_preco_tecido = false;
+                self.refresh_lista_precos_tecido_input();
+                self.db_status = String::from("Edicao de preco do tecido cancelada.");
+            }
+            KeyCode::Esc if self.editing_lista_preco_vinculo => {
+                self.editing_lista_preco_vinculo = false;
+                self.refresh_lista_precos_vinculo_input();
+                self.db_status = String::from("Edicao de preco especifico cancelada.");
+            }
+            KeyCode::Backspace if self.editing_lista_preco_tecido => {
+                self.lista_precos_tecido_input.pop();
+            }
+            KeyCode::Backspace if self.editing_lista_preco_vinculo => {
+                self.lista_precos_vinculo_input.pop();
+            }
+            KeyCode::Char(character)
+                if !character.is_control() && self.editing_lista_preco_tecido =>
+            {
+                self.lista_precos_tecido_input.push(character);
+            }
+            KeyCode::Char(character)
+                if !character.is_control() && self.editing_lista_preco_vinculo =>
+            {
+                self.lista_precos_vinculo_input.push(character);
+            }
+            _ => {}
+        }
+    }
+
+    fn open_lista_precos_vinculos(&mut self) {
+        let Some(tecido) = self.tecidos.get(self.lista_precos_tecido_option) else {
+            return;
+        };
+        self.vinculo_tecido_option = self
+            .tecidos
+            .iter()
+            .position(|item| item.id == tecido.id)
+            .unwrap_or(self.lista_precos_tecido_option);
+        self.load_vinculos(tecido.id);
+        self.lista_precos_vinculo_option = 0;
+        self.editing_lista_preco_tecido = false;
+        self.editing_lista_preco_vinculo = false;
+        self.refresh_lista_precos_vinculo_input();
+        self.dados_screen = DadosScreen::ListaPrecosVinculos;
+    }
+
+    fn refresh_lista_precos_tecido_input(&mut self) {
+        self.lista_precos_tecido_input = self
+            .tecidos
+            .get(self.lista_precos_tecido_option)
+            .and_then(|tecido| tecido_preco_venda(tecido, self.lista_precos_tipo))
+            .map(|value| format!("{value:.2}"))
+            .unwrap_or_default();
+    }
+
+    pub(in crate::app) fn refresh_lista_precos_vinculo_input(&mut self) {
+        self.lista_precos_vinculo_input = self
+            .vinculos
+            .get(self.lista_precos_vinculo_option)
+            .and_then(|vinculo| vinculo_preco_override(vinculo, self.lista_precos_tipo))
+            .map(|value| format!("{value:.2}"))
+            .unwrap_or_default();
+    }
+
+    fn salvar_lista_preco_tecido(&mut self) {
+        let Some(tecido) = self.tecidos.get(self.lista_precos_tecido_option) else {
+            self.editing_lista_preco_tecido = false;
+            return;
+        };
+        let Some(pool) = &self.db_pool else {
+            self.editing_lista_preco_tecido = false;
+            self.db_status = String::from("Banco local indisponivel para salvar preco do tecido.");
+            return;
+        };
+        let preco = if self.lista_precos_tecido_input.trim().is_empty() {
+            None
+        } else {
+            match parse_number(&self.lista_precos_tecido_input).filter(|value| *value >= 0.0) {
+                Some(value) => Some(value),
+                None => {
+                    self.db_status = String::from("Preco do tecido invalido.");
+                    return;
+                }
+            }
+        };
+
+        match self.db_runtime.block_on(db::update_tecido_preco_venda(
+            pool,
+            tecido.id,
+            self.lista_precos_tipo,
+            preco,
+        )) {
+            Ok(()) => {
+                self.editing_lista_preco_tecido = false;
+                self.reload_tecidos();
+                self.refresh_lista_precos_tecido_input();
+                self.db_status =
+                    format!("Preco {} do tecido salvo.", self.lista_precos_tipo.title());
+            }
+            Err(error) => self.db_status = format!("Erro ao salvar preco do tecido: {error}"),
+        }
+    }
+
+    fn salvar_lista_preco_vinculo(&mut self) {
+        let Some(tecido) = self.tecidos.get(self.lista_precos_tecido_option) else {
+            self.editing_lista_preco_vinculo = false;
+            return;
+        };
+        let Some(vinculo) = self.vinculos.get(self.lista_precos_vinculo_option) else {
+            self.editing_lista_preco_vinculo = false;
+            return;
+        };
+        let Some(pool) = &self.db_pool else {
+            self.editing_lista_preco_vinculo = false;
+            self.db_status = String::from("Banco local indisponivel para salvar preco especifico.");
+            return;
+        };
+
+        let base = tecido_preco_venda(tecido, self.lista_precos_tipo);
+        let preco_override = if self.lista_precos_vinculo_input.trim().is_empty() {
+            None
+        } else {
+            match parse_number(&self.lista_precos_vinculo_input).filter(|value| *value >= 0.0) {
+                Some(value) if money_matches(value, base) => None,
+                Some(value) => Some(value),
+                None => {
+                    self.db_status = String::from("Preco especifico invalido.");
+                    return;
+                }
+            }
+        };
+        let usa_estampas = tecido.tipo == "Estampado";
+
+        match self.db_runtime.block_on(db::update_vinculo_preco_override(
+            pool,
+            tecido.id,
+            vinculo.cor_id,
+            usa_estampas,
+            self.lista_precos_tipo,
+            preco_override,
+        )) {
+            Ok(()) => {
+                self.editing_lista_preco_vinculo = false;
+                self.load_vinculos(tecido.id);
+                self.refresh_lista_precos_vinculo_input();
+                self.db_status = if preco_override.is_some() {
+                    format!("Preco {} especifico salvo.", self.lista_precos_tipo.title())
+                } else {
+                    format!(
+                        "Preco {} especifico removido; usando preco do tecido.",
+                        self.lista_precos_tipo.title()
+                    )
+                };
+            }
+            Err(error) => self.db_status = format!("Erro ao salvar preco especifico: {error}"),
+        }
     }
 
     pub(super) fn handle_vinculo_detalhe_enter(&mut self) {
@@ -941,10 +1160,16 @@ impl App {
             return;
         };
 
+        let custo_base = self
+            .vinculos
+            .get(self.vinculo_lista_option)
+            .and_then(|vinculo| vinculo.tecido_custo_base);
+
         let custo_override = if self.vinculo_custo_input.trim().is_empty() {
             None
         } else {
             match parse_number(&self.vinculo_custo_input).filter(|value| *value >= 0.0) {
+                Some(value) if custo_matches_base(value, custo_base) => None,
                 Some(value) => Some(value),
                 None => {
                     self.db_status = String::from("Custo do vinculo invalido.");
@@ -975,7 +1200,34 @@ impl App {
             }
         }
     }
+}
 
+fn custo_matches_base(value: f64, base: Option<f64>) -> bool {
+    money_matches(value, base)
+}
+
+fn money_matches(value: f64, base: Option<f64>) -> bool {
+    let Some(base) = base else {
+        return false;
+    };
+    (value * 100.0).round() as i64 == (base * 100.0).round() as i64
+}
+
+fn tecido_preco_venda(tecido: &TecidoRecord, tipo: ListaPrecoTipo) -> Option<f64> {
+    match tipo {
+        ListaPrecoTipo::Atacado => tecido.preco_atacado,
+        ListaPrecoTipo::Varejo => tecido.preco_varejo,
+    }
+}
+
+fn vinculo_preco_override(vinculo: &VinculoRecord, tipo: ListaPrecoTipo) -> Option<f64> {
+    match tipo {
+        ListaPrecoTipo::Atacado => vinculo.preco_atacado_override,
+        ListaPrecoTipo::Varejo => vinculo.preco_varejo_override,
+    }
+}
+
+impl App {
     fn refresh_vinculo_thumbnail(&mut self) {
         self.vinculo_thumbnail = None;
         let Some((tecido_id, item_id, usa_estampas)) = self.selected_vinculo_keys() else {
