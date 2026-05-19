@@ -6,12 +6,21 @@ use ratatui::{
     widgets::{Block, Borders, List, ListItem, ListState, Paragraph, Wrap},
 };
 
-use crate::{shopee::ShopeeStockGroup, ui::selected_style};
+use crate::{
+    db::TecidoRecord,
+    shopee::ShopeeStockGroup,
+    ui::selected_style,
+};
 
 pub fn render(
     frame: &mut Frame,
     area: Rect,
     selected: usize,
+    tecidos: &[TecidoRecord],
+    listing_active: bool,
+    listing_selected: usize,
+    listing_price: &str,
+    listing_confirm: bool,
     stock_groups: &[ShopeeStockGroup],
     stock_selected: usize,
     stock_confirm: bool,
@@ -33,7 +42,16 @@ pub fn render(
 
     frame.render_stateful_widget(list, chunks[0], &mut state);
 
-    if selected == 1 && !stock_groups.is_empty() {
+    if selected == 0 && listing_active {
+        render_listing_form(
+            frame,
+            chunks[0],
+            tecidos,
+            listing_selected,
+            listing_price,
+            listing_confirm,
+        );
+    } else if selected == 1 && !stock_groups.is_empty() {
         render_stock_groups(frame, chunks[0], stock_groups, stock_selected);
     }
 
@@ -50,6 +68,55 @@ pub fn render(
         )
         .wrap(Wrap { trim: false });
     frame.render_widget(status, chunks[1]);
+}
+
+fn render_listing_form(
+    frame: &mut Frame,
+    area: Rect,
+    tecidos: &[TecidoRecord],
+    selected: usize,
+    price: &str,
+    confirm: bool,
+) {
+    let mut rows = vec![
+        Line::from("Categoria: Roupas Femininas > Tecidos > Outros"),
+        Line::from("Marca: Razai Tecidos | Condicao: Novo | Status: NORMAL"),
+        Line::from(format!(
+            "Preco: {}",
+            if price.is_empty() { "<digite>" } else { price }
+        )),
+        Line::from("Enter seleciona/confirma | digite preco | Backspace apaga | Esc cancela"),
+        Line::from(""),
+    ];
+    if confirm {
+        rows.push(Line::from("Confirmar criacao real do anuncio NORMAL na Shopee? Enter/S confirma; Esc/N cancela."));
+    } else if tecidos.is_empty() {
+        rows.push(Line::from("Nenhum tecido cadastrado."));
+    } else {
+        rows.extend(tecidos.iter().enumerate().map(|(index, tecido)| {
+            let current = index == selected;
+            Line::from(vec![
+                Span::styled(if current { "> " } else { "  " }, selected_style(current)),
+                Span::styled(tecido.sku.clone(), Style::default().fg(Color::Yellow)),
+                Span::raw(format!(
+                    " | {} | gramatura linear {} g/m",
+                    tecido.nome,
+                    tecido
+                        .gramatura_linear_g_m
+                        .map(|value| value.to_string())
+                        .unwrap_or_else(|| String::from("ausente"))
+                )),
+            ])
+        }));
+    }
+    let widget = Paragraph::new(Text::from(rows))
+        .block(
+            Block::default()
+                .title("Shopee > Criar anuncio")
+                .borders(Borders::ALL),
+        )
+        .wrap(Wrap { trim: false });
+    frame.render_widget(widget, area);
 }
 
 fn render_stock_groups(

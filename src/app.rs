@@ -110,6 +110,10 @@ pub struct App {
     pub shopee_stock_groups: Vec<shopee::ShopeeStockGroup>,
     pub shopee_stock_option: usize,
     pub shopee_stock_confirm: bool,
+    pub shopee_listing_active: bool,
+    pub shopee_listing_tecido_option: usize,
+    pub shopee_listing_price: String,
+    pub shopee_listing_confirm: bool,
     pub shopee_status: String,
     pub printers: Vec<String>,
     pub printer_option: usize,
@@ -218,6 +222,10 @@ impl App {
             shopee_stock_groups: Vec::new(),
             shopee_stock_option: 0,
             shopee_stock_confirm: false,
+            shopee_listing_active: false,
+            shopee_listing_tecido_option: 0,
+            shopee_listing_price: String::new(),
+            shopee_listing_confirm: false,
             shopee_status,
             printers,
             printer_option,
@@ -476,6 +484,65 @@ impl App {
     }
 
     fn handle_shopee_key(&mut self, key: KeyCode) {
+        if self.shopee_listing_confirm {
+            match key {
+                KeyCode::Esc | KeyCode::Char('n') | KeyCode::Char('N') => {
+                    self.shopee_listing_confirm = false;
+                    self.shopee_status = String::from("Criacao de anuncio cancelada.");
+                }
+                KeyCode::Enter | KeyCode::Char('s') | KeyCode::Char('S') => {
+                    self.create_selected_shopee_listing();
+                }
+                _ => {}
+            }
+            return;
+        }
+
+        if self.shopee_listing_active {
+            match key {
+                KeyCode::Esc => {
+                    self.shopee_listing_active = false;
+                    self.shopee_listing_confirm = false;
+                    self.shopee_status = String::from("Criacao de anuncio cancelada.");
+                }
+                KeyCode::Left => self.section = self.section.previous(),
+                KeyCode::Right => self.section = self.section.next(),
+                KeyCode::Up if !self.tecidos.is_empty() => {
+                    self.shopee_listing_tecido_option =
+                        (self.shopee_listing_tecido_option + self.tecidos.len() - 1)
+                            % self.tecidos.len();
+                }
+                KeyCode::Down if !self.tecidos.is_empty() => {
+                    self.shopee_listing_tecido_option =
+                        (self.shopee_listing_tecido_option + 1) % self.tecidos.len();
+                }
+                KeyCode::Backspace => {
+                    self.shopee_listing_price.pop();
+                }
+                KeyCode::Char(character)
+                    if character.is_ascii_digit() || character == ',' || character == '.' =>
+                {
+                    self.shopee_listing_price.push(character);
+                }
+                KeyCode::Enter => {
+                    if self.tecidos.is_empty() {
+                        self.shopee_status =
+                            String::from("Cadastre um tecido antes de criar anuncio Shopee.");
+                    } else if parse_price(&self.shopee_listing_price).is_none() {
+                        self.shopee_status =
+                            String::from("Informe um preco valido para o anuncio Shopee.");
+                    } else {
+                        self.shopee_listing_confirm = true;
+                        self.shopee_status = String::from(
+                            "Confirmar criacao real do anuncio NORMAL na Shopee? Enter/S confirma; Esc/N cancela.",
+                        );
+                    }
+                }
+                _ => {}
+            }
+            return;
+        }
+
         if self.shopee_stock_confirm {
             match key {
                 KeyCode::Esc | KeyCode::Char('n') | KeyCode::Char('N') => {
@@ -549,9 +616,14 @@ impl App {
             }
             KeyCode::Enter => {
                 let status = match self.shopee_menu_option {
-                    0 => self
-                        .db_runtime
-                        .block_on(shopee::create_listing_status(self.db_pool.as_ref())),
+                    0 => {
+                        self.shopee_listing_active = true;
+                        self.shopee_listing_tecido_option = 0;
+                        self.shopee_listing_price.clear();
+                        self.shopee_listing_confirm = false;
+                        self.db_runtime
+                            .block_on(shopee::create_listing_status(self.db_pool.as_ref()))
+                    }
                     1 if self.shopee_stock_groups.is_empty() => {
                         match self
                             .db_runtime
@@ -593,6 +665,62 @@ impl App {
             }
             _ => {}
         }
+    }
+
+    fn create_selected_shopee_listing(&mut self) {
+        let Some(tecido) = self.tecidos.get(self.shopee_listing_tecido_option).cloned() else {
+            self.shopee_status = String::from("Nenhum tecido selecionado.");
+            self.shopee_listing_confirm = false;
+            return;
+        };
+        let Some(price) = parse_price(&self.shopee_listing_price) else {
+            self.shopee_status = String::from("Informe um preco valido para o anuncio Shopee.");
+            self.shopee_listing_confirm = false;
+            return;
+        };
+        let vinculos_result = match tecido.tipo.as_str() {
+            "Estampado" => self.db_pool.as_ref().map(|pool| {
+                self.db_runtime
+                    .block_on(db::list_estampa_vinculos_by_tecido(pool, tecido.id))
+            }),
+            _ => self.db_pool.as_ref().map(|pool| {
+                self.db_runtime
+                    .block_on(db::list_vinculos_by_tecido(pool, tecido.id))
+            }),
+        };
+        let Some(vinculos_result) = vinculos_result else {
+            self.shopee_status = String::from("Banco local indisponivel para carregar vinculos.");
+            self.shopee_listing_confirm = false;
+            return;
+        };
+        let vinculos = match vinculos_result {
+            Ok(vinculos) => vinculos,
+            Err(error) => {
+                self.shopee_status = format!("Falha ao carregar vinculos do tecido: {error}");
+                self.shopee_listing_confirm = false;
+                return;
+            }
+        };
+        let status = match self.db_runtime.block_on(shopee::create_fabric_listing(
+            self.db_pool.as_ref(),
+            &tecido,
+            &vinculos,
+            price,
+        )) {
+            Ok(result) => format!(
+                "Anuncio Shopee criado NORMAL. item_id {} | SKU {} | {} cores x {} tamanhos = {} variacoes | imagem {}",
+                result.item_id,
+                result.sku,
+                result.color_count,
+                result.size_count,
+                result.model_count,
+                result.image_id
+            ),
+            Err(error) => format!("Shopee: falha ao criar anuncio: {error}"),
+        };
+        self.shopee_listing_confirm = false;
+        self.shopee_status = status.clone();
+        self.db_status = status;
     }
 
     fn submit_chat(&mut self) {
@@ -822,6 +950,11 @@ impl App {
                 frame,
                 body[0],
                 self.shopee_menu_option,
+                &self.tecidos,
+                self.shopee_listing_active,
+                self.shopee_listing_tecido_option,
+                &self.shopee_listing_price,
+                self.shopee_listing_confirm,
                 &self.shopee_stock_groups,
                 self.shopee_stock_option,
                 self.shopee_stock_confirm,
@@ -861,6 +994,14 @@ fn empty_label(value: &str) -> &str {
     } else {
         value
     }
+}
+
+fn parse_price(value: &str) -> Option<f64> {
+    let normalized = value.trim().replace(',', ".");
+    normalized
+        .parse::<f64>()
+        .ok()
+        .filter(|price| price.is_finite() && *price >= 1.0)
 }
 
 fn parse_shopee_code(message: &str) -> Option<&str> {
