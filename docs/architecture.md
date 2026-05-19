@@ -100,9 +100,9 @@ Fluxo de estoque:
 1. `product/get_item_list` lista itens `NORMAL`.
 2. `product/get_item_base_info` busca dados em lotes de ate 50.
 3. `product/get_model_list` busca modelos quando o item possui variacoes.
-4. O app agrupa por `model_sku` ou `item_sku`, normalizado com `trim + uppercase`.
-5. O operador alterna o grupo entre `Zerar 0` e `Ativar 100`.
-6. A confirmacao atualiza apenas o SKU selecionado.
+4. O app agrupa primeiro por SKU Pai (`item_sku`) e depois por variacao (`model_sku` ou `item_sku`), normalizado com `trim + uppercase`.
+5. O operador expande o SKU Pai e alterna a variacao entre `Zerar 0` e `Ativar 100`.
+6. A confirmacao atualiza apenas a variacao selecionada.
 
 Fluxo de anuncio:
 

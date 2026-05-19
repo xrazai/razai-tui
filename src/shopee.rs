@@ -56,6 +56,7 @@ pub struct ShopeeTokens {
 
 #[derive(Clone, Debug)]
 pub struct ShopeeStockOccurrence {
+    pub parent_sku: String,
     pub sku: String,
     pub item_id: i64,
     pub model_id: i64,
@@ -65,6 +66,15 @@ pub struct ShopeeStockOccurrence {
     pub reserved_stock: i64,
     pub location_id: Option<String>,
     pub multi_location: bool,
+}
+
+#[derive(Clone, Debug)]
+pub struct ShopeeStockParentGroup {
+    pub sku: String,
+    pub name: String,
+    pub groups: Vec<ShopeeStockGroup>,
+    pub total_current_stock: i64,
+    pub expanded: bool,
 }
 
 #[derive(Clone, Debug)]
@@ -215,7 +225,7 @@ pub async fn create_fabric_listing(
 
 pub async fn fetch_online_stock_groups(
     pool: Option<&PgPool>,
-) -> Result<Vec<ShopeeStockGroup>, ShopeeError> {
+) -> Result<Vec<ShopeeStockParentGroup>, ShopeeError> {
     let config = ShopeeConfig::from_env()?;
     let tokens = ensure_connected_with_config(pool, &config).await?;
     match fetch_online_stock_groups_with_tokens(&config, &tokens).await {
@@ -372,7 +382,7 @@ async fn refresh_tokens(
 async fn fetch_online_stock_groups_with_tokens(
     config: &ShopeeConfig,
     tokens: &ShopeeTokens,
-) -> Result<Vec<ShopeeStockGroup>, ShopeeError> {
+) -> Result<Vec<ShopeeStockParentGroup>, ShopeeError> {
     let item_ids = get_all_item_ids(config, tokens).await?;
     let mut item_infos = Vec::new();
     for chunk in item_ids.chunks(50) {
@@ -393,13 +403,13 @@ async fn fetch_online_stock_groups_with_tokens(
             .unwrap_or(false);
         if has_model {
             let models = get_model_list(config, tokens, item_id).await?;
-            occurrences.extend(model_occurrences(item_id, &item_name, &models));
+            occurrences.extend(model_occurrences(&item, item_id, &item_name, &models));
         } else if let Some(occurrence) = item_occurrence(&item) {
             occurrences.push(occurrence);
         }
     }
 
-    Ok(group_stock_occurrences(occurrences))
+    Ok(group_stock_occurrences_by_parent(occurrences))
 }
 
 async fn sync_stock_groups_with_tokens(
@@ -472,7 +482,11 @@ async fn create_fabric_listing_with_tokens(
             "measure_unit": "M"
         }
     });
-    let add_value = post_json(signed_shop_url(config, tokens, "/api/v2/product/add_item", &[]), &item_body).await?;
+    let add_value = post_json(
+        signed_shop_url(config, tokens, "/api/v2/product/add_item", &[]),
+        &item_body,
+    )
+    .await?;
     ensure_no_api_error(&add_value)?;
     let item_id = add_value
         .pointer("/response/item_id")
@@ -655,7 +669,12 @@ async fn listing_logistics(
     ))
     .await?;
     ensure_no_api_error(&value)?;
-    let wanted = ["Retirada", "Shopee Xpress", "Entrega Rápida", "Entrega Rapida"];
+    let wanted = [
+        "Retirada",
+        "Shopee Xpress",
+        "Entrega Rápida",
+        "Entrega Rapida",
+    ];
     let channels = value
         .pointer("/response/logistics_channel_list")
         .and_then(Value::as_array)
@@ -981,6 +1000,7 @@ fn item_occurrence(item: &Value) -> Option<ShopeeStockOccurrence> {
         .to_string();
     let stock = item_stock(item);
     Some(ShopeeStockOccurrence {
+        parent_sku: sku.clone(),
         sku,
         item_id,
         model_id: 0,
@@ -994,10 +1014,16 @@ fn item_occurrence(item: &Value) -> Option<ShopeeStockOccurrence> {
 }
 
 fn model_occurrences(
+    item: &Value,
     item_id: i64,
     item_name: &str,
     response: &Value,
 ) -> Vec<ShopeeStockOccurrence> {
+    let Some(parent_sku) =
+        normalize_sku(item.get("item_sku").and_then(Value::as_str).unwrap_or(""))
+    else {
+        return Vec::new();
+    };
     response
         .get("model")
         .and_then(Value::as_array)
@@ -1008,6 +1034,7 @@ fn model_occurrences(
             let model_id = model.get("model_id").and_then(Value::as_i64)?;
             let stock = model_stock(model);
             Some(ShopeeStockOccurrence {
+                parent_sku: parent_sku.clone(),
                 sku,
                 item_id,
                 model_id,
@@ -1104,6 +1131,39 @@ pub fn group_stock_occurrences(occurrences: Vec<ShopeeStockOccurrence>) -> Vec<S
         .collect::<Vec<_>>();
     groups.sort_by(|left, right| left.sku.cmp(&right.sku));
     groups
+}
+
+pub fn group_stock_occurrences_by_parent(
+    occurrences: Vec<ShopeeStockOccurrence>,
+) -> Vec<ShopeeStockParentGroup> {
+    let mut map = HashMap::<String, Vec<ShopeeStockOccurrence>>::new();
+    for occurrence in occurrences {
+        map.entry(occurrence.parent_sku.clone())
+            .or_default()
+            .push(occurrence);
+    }
+    let mut parents = map
+        .into_iter()
+        .map(|(sku, occurrences)| {
+            let name = occurrences
+                .first()
+                .map(|occurrence| occurrence.name.clone())
+                .unwrap_or_else(|| String::from("sem nome"));
+            let total_current_stock = occurrences
+                .iter()
+                .map(|occurrence| occurrence.seller_stock)
+                .sum::<i64>();
+            ShopeeStockParentGroup {
+                sku,
+                name,
+                groups: group_stock_occurrences(occurrences),
+                total_current_stock,
+                expanded: false,
+            }
+        })
+        .collect::<Vec<_>>();
+    parents.sort_by(|left, right| left.sku.cmp(&right.sku));
+    parents
 }
 
 async fn parse_token_response(response: reqwest::Response) -> Result<ShopeeTokens, ShopeeError> {
@@ -1756,6 +1816,7 @@ mod tests {
         let groups = group_stock_occurrences(
             vec![
                 ShopeeStockOccurrence {
+                    parent_sku: String::from("ANAR"),
                     sku: String::from("abc"),
                     item_id: 1,
                     model_id: 0,
@@ -1767,6 +1828,7 @@ mod tests {
                     multi_location: false,
                 },
                 ShopeeStockOccurrence {
+                    parent_sku: String::from("ANAR"),
                     sku: String::from("ABC"),
                     item_id: 2,
                     model_id: 10,
@@ -1793,6 +1855,60 @@ mod tests {
     }
 
     #[test]
+    fn groups_stock_by_parent_sku_then_variation_sku() {
+        let parents = group_stock_occurrences_by_parent(vec![
+            ShopeeStockOccurrence {
+                parent_sku: String::from("ANAR"),
+                sku: String::from("ANAR-AZUL"),
+                item_id: 1,
+                model_id: 10,
+                name: String::from("Anarruga"),
+                seller_stock: 2,
+                available_stock: 2,
+                reserved_stock: 0,
+                location_id: None,
+                multi_location: false,
+            },
+            ShopeeStockOccurrence {
+                parent_sku: String::from("ANAR"),
+                sku: String::from("ANAR-BRANCO"),
+                item_id: 1,
+                model_id: 11,
+                name: String::from("Anarruga"),
+                seller_stock: 3,
+                available_stock: 3,
+                reserved_stock: 0,
+                location_id: None,
+                multi_location: false,
+            },
+        ]);
+
+        assert_eq!(parents.len(), 1);
+        assert_eq!(parents[0].sku, "ANAR");
+        assert_eq!(parents[0].groups.len(), 2);
+        assert_eq!(parents[0].total_current_stock, 5);
+    }
+
+    #[test]
+    fn item_without_variation_is_parent_and_child() {
+        let parents = group_stock_occurrences_by_parent(vec![ShopeeStockOccurrence {
+            parent_sku: String::from("HELA"),
+            sku: String::from("HELA"),
+            item_id: 1,
+            model_id: 0,
+            name: String::from("Helanca"),
+            seller_stock: 4,
+            available_stock: 4,
+            reserved_stock: 0,
+            location_id: None,
+            multi_location: false,
+        }]);
+
+        assert_eq!(parents[0].sku, "HELA");
+        assert_eq!(parents[0].groups[0].sku, "HELA");
+    }
+
+    #[test]
     fn stock_group_toggle_switches_between_zero_and_one_hundred() {
         let mut group = ShopeeStockGroup {
             sku: String::from("ABC"),
@@ -1813,6 +1929,7 @@ mod tests {
     #[test]
     fn multi_location_group_is_not_syncable() {
         let groups = group_stock_occurrences(vec![ShopeeStockOccurrence {
+            parent_sku: String::from("ABC"),
             sku: String::from("ABC"),
             item_id: 1,
             model_id: 0,

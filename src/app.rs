@@ -33,6 +33,12 @@ mod vendas;
 
 use std::io;
 
+#[derive(Clone, Copy)]
+enum ShopeeStockCursorTarget {
+    Parent(usize),
+    Child(usize, usize),
+}
+
 pub struct App {
     pub section: Section,
     pub dados_screen: DadosScreen,
@@ -107,8 +113,8 @@ pub struct App {
     pub finalizar_pedido_option: FinalizarVendaOption,
     pub pending_approve_pedido: bool,
     pub shopee_menu_option: usize,
-    pub shopee_stock_groups: Vec<shopee::ShopeeStockGroup>,
-    pub shopee_stock_option: usize,
+    pub shopee_stock_groups: Vec<shopee::ShopeeStockParentGroup>,
+    pub shopee_stock_cursor: usize,
     pub shopee_stock_confirm: bool,
     pub shopee_listing_active: bool,
     pub shopee_listing_tecido_option: usize,
@@ -220,7 +226,7 @@ impl App {
             pending_approve_pedido: false,
             shopee_menu_option: 0,
             shopee_stock_groups: Vec::new(),
-            shopee_stock_option: 0,
+            shopee_stock_cursor: 0,
             shopee_stock_confirm: false,
             shopee_listing_active: false,
             shopee_listing_tecido_option: 0,
@@ -529,8 +535,9 @@ impl App {
                         self.shopee_status =
                             String::from("Cadastre um tecido antes de criar anuncio Shopee.");
                     } else if parse_price(&self.shopee_listing_price).is_none() {
-                        self.shopee_status =
-                            String::from("Informe um preco por metro valido para o anuncio Shopee.");
+                        self.shopee_status = String::from(
+                            "Informe um preco por metro valido para o anuncio Shopee.",
+                        );
                     } else {
                         self.shopee_listing_confirm = true;
                         self.shopee_status = String::from(
@@ -551,15 +558,13 @@ impl App {
                 }
                 KeyCode::Enter | KeyCode::Char('s') | KeyCode::Char('S') => {
                     let groups = self
-                        .shopee_stock_groups
-                        .get(self.shopee_stock_option)
-                        .cloned()
+                        .selected_shopee_stock_child()
                         .into_iter()
                         .collect::<Vec<_>>();
-                    let status = match self.db_runtime.block_on(shopee::sync_stock_groups(
-                        self.db_pool.as_ref(),
-                        &groups,
-                    )) {
+                    let status = match self
+                        .db_runtime
+                        .block_on(shopee::sync_stock_groups(self.db_pool.as_ref(), &groups))
+                    {
                         Ok(result) => format!(
                             "Sync Shopee concluido. Atualizados: {}. Ignorados: {}. Falhas: {}{}",
                             result.updated,
@@ -588,13 +593,12 @@ impl App {
             KeyCode::Right => self.section = self.section.next(),
             KeyCode::Up | KeyCode::Down => {
                 if self.shopee_menu_option == 1 && !self.shopee_stock_groups.is_empty() {
+                    let visible_len = self.shopee_stock_visible_len();
                     if key == KeyCode::Up {
-                        self.shopee_stock_option =
-                            (self.shopee_stock_option + self.shopee_stock_groups.len() - 1)
-                                % self.shopee_stock_groups.len();
+                        self.shopee_stock_cursor =
+                            (self.shopee_stock_cursor + visible_len - 1) % visible_len;
                     } else {
-                        self.shopee_stock_option =
-                            (self.shopee_stock_option + 1) % self.shopee_stock_groups.len();
+                        self.shopee_stock_cursor = (self.shopee_stock_cursor + 1) % visible_len;
                     }
                 } else {
                     self.shopee_menu_option = if key == KeyCode::Up {
@@ -606,11 +610,13 @@ impl App {
             }
             KeyCode::Char(' ') => {
                 if self.shopee_menu_option == 1 {
-                    if let Some(group) = self.shopee_stock_groups.get_mut(self.shopee_stock_option)
-                    {
+                    if let Some(group) = self.selected_shopee_stock_child_mut() {
                         group.toggle_target();
                         self.shopee_status =
                             format!("SKU {} marcado para {}.", group.sku, group.target_label());
+                    } else {
+                        self.shopee_status =
+                            String::from("Expanda um SKU Pai e selecione uma variacao para 0/100.");
                     }
                 }
             }
@@ -632,24 +638,47 @@ impl App {
                             Ok(groups) => {
                                 let occurrences = groups
                                     .iter()
+                                    .flat_map(|parent| parent.groups.iter())
                                     .map(|group| group.occurrences.len())
                                     .sum::<usize>();
                                 self.shopee_stock_groups = groups;
-                                self.shopee_stock_option = 0;
+                                self.shopee_stock_cursor = 0;
                                 format!(
-                                    "Estoque Online carregado: {} SKUs, {occurrences} anuncios/modelos. Space alterna 0/100; Enter confirma sync.",
-                                    self.shopee_stock_groups.len()
+                                    "Estoque Online carregado: {} SKUs Pai, {} variacoes, {occurrences} anuncios/modelos. Enter expande; Space alterna variacao 0/100.",
+                                    self.shopee_stock_groups.len(),
+                                    self.shopee_stock_groups
+                                        .iter()
+                                        .map(|parent| parent.groups.len())
+                                        .sum::<usize>()
                                 )
                             }
                             Err(error) => format!("Shopee: falha ao consultar estoque: {error}"),
                         }
                     }
-                    1 => {
-                        self.shopee_stock_confirm = true;
-                        String::from(
-                            "Confirmar sincronizacao do SKU selecionado? Enter/S confirma; Esc/N cancela.",
-                        )
-                    }
+                    1 => match self.current_shopee_stock_target() {
+                        Some(ShopeeStockCursorTarget::Parent(parent_index)) => {
+                            if let Some(parent) = self.shopee_stock_groups.get_mut(parent_index) {
+                                parent.expanded = !parent.expanded;
+                                let sku = parent.sku.clone();
+                                let expanded = parent.expanded;
+                                self.clamp_shopee_stock_cursor();
+                                format!(
+                                    "SKU Pai {} {}.",
+                                    sku,
+                                    if expanded { "expandido" } else { "recolhido" }
+                                )
+                            } else {
+                                String::from("SKU Pai invalido.")
+                            }
+                        }
+                        Some(ShopeeStockCursorTarget::Child(_, _)) => {
+                            self.shopee_stock_confirm = true;
+                            String::from(
+                                "Confirmar sincronizacao da variacao selecionada? Enter/S confirma; Esc/N cancela.",
+                            )
+                        }
+                        None => String::from("Carregue o estoque Shopee antes de sincronizar."),
+                    },
                     _ => shopee::listing_guide_status(),
                 };
                 self.shopee_status = status.clone();
@@ -660,10 +689,71 @@ impl App {
             KeyCode::Char('3') => self.shopee_menu_option = 2,
             KeyCode::Char('r') | KeyCode::Char('R') => {
                 self.shopee_stock_groups.clear();
-                self.shopee_stock_option = 0;
+                self.shopee_stock_cursor = 0;
                 self.shopee_status = String::from("Estoque Shopee limpo. Enter recarrega.");
             }
             _ => {}
+        }
+    }
+
+    fn shopee_stock_visible_len(&self) -> usize {
+        self.shopee_stock_groups
+            .iter()
+            .map(|parent| {
+                1 + if parent.expanded {
+                    parent.groups.len()
+                } else {
+                    0
+                }
+            })
+            .sum::<usize>()
+            .max(1)
+    }
+
+    fn current_shopee_stock_target(&self) -> Option<ShopeeStockCursorTarget> {
+        let mut cursor = self.shopee_stock_cursor;
+        for (parent_index, parent) in self.shopee_stock_groups.iter().enumerate() {
+            if cursor == 0 {
+                return Some(ShopeeStockCursorTarget::Parent(parent_index));
+            }
+            cursor -= 1;
+            if parent.expanded {
+                if cursor < parent.groups.len() {
+                    return Some(ShopeeStockCursorTarget::Child(parent_index, cursor));
+                }
+                cursor -= parent.groups.len();
+            }
+        }
+        None
+    }
+
+    fn selected_shopee_stock_child(&self) -> Option<shopee::ShopeeStockGroup> {
+        match self.current_shopee_stock_target()? {
+            ShopeeStockCursorTarget::Child(parent_index, child_index) => self
+                .shopee_stock_groups
+                .get(parent_index)?
+                .groups
+                .get(child_index)
+                .cloned(),
+            ShopeeStockCursorTarget::Parent(_) => None,
+        }
+    }
+
+    fn selected_shopee_stock_child_mut(&mut self) -> Option<&mut shopee::ShopeeStockGroup> {
+        match self.current_shopee_stock_target()? {
+            ShopeeStockCursorTarget::Child(parent_index, child_index) => self
+                .shopee_stock_groups
+                .get_mut(parent_index)?
+                .groups
+                .get_mut(child_index),
+            ShopeeStockCursorTarget::Parent(_) => None,
+        }
+    }
+
+    fn clamp_shopee_stock_cursor(&mut self) {
+        let visible_len = self.shopee_stock_visible_len();
+        if self.shopee_stock_cursor >= visible_len {
+            self.shopee_stock_cursor = visible_len.saturating_sub(1);
         }
     }
 
@@ -674,7 +764,8 @@ impl App {
             return;
         };
         let Some(price) = parse_price(&self.shopee_listing_price) else {
-            self.shopee_status = String::from("Informe um preco por metro valido para o anuncio Shopee.");
+            self.shopee_status =
+                String::from("Informe um preco por metro valido para o anuncio Shopee.");
             self.shopee_listing_confirm = false;
             return;
         };
@@ -956,7 +1047,7 @@ impl App {
                 &self.shopee_listing_price,
                 self.shopee_listing_confirm,
                 &self.shopee_stock_groups,
-                self.shopee_stock_option,
+                self.shopee_stock_cursor,
                 self.shopee_stock_confirm,
                 &self.shopee_status,
             ),

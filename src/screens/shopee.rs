@@ -6,11 +6,7 @@ use ratatui::{
     widgets::{Block, Borders, List, ListItem, ListState, Paragraph, Wrap},
 };
 
-use crate::{
-    db::TecidoRecord,
-    shopee::ShopeeStockGroup,
-    ui::selected_style,
-};
+use crate::{db::TecidoRecord, shopee::ShopeeStockParentGroup, ui::selected_style};
 
 pub fn render(
     frame: &mut Frame,
@@ -21,8 +17,8 @@ pub fn render(
     listing_selected: usize,
     listing_price: &str,
     listing_confirm: bool,
-    stock_groups: &[ShopeeStockGroup],
-    stock_selected: usize,
+    stock_groups: &[ShopeeStockParentGroup],
+    stock_cursor: usize,
     stock_confirm: bool,
     status: &str,
 ) {
@@ -52,7 +48,7 @@ pub fn render(
             listing_confirm,
         );
     } else if selected == 1 && !stock_groups.is_empty() {
-        render_stock_groups(frame, chunks[0], stock_groups, stock_selected);
+        render_stock_groups(frame, chunks[0], stock_groups, stock_cursor);
     }
 
     let status_text = if stock_confirm {
@@ -89,7 +85,9 @@ fn render_listing_form(
         Line::from(""),
     ];
     if confirm {
-        rows.push(Line::from("Confirmar criacao real do anuncio NORMAL na Shopee? Enter/S confirma; Esc/N cancela."));
+        rows.push(Line::from(
+            "Confirmar criacao real do anuncio NORMAL na Shopee? Enter/S confirma; Esc/N cancela.",
+        ));
     } else if tecidos.is_empty() {
         rows.push(Line::from("Nenhum tecido cadastrado."));
     } else {
@@ -122,52 +120,71 @@ fn render_listing_form(
 fn render_stock_groups(
     frame: &mut Frame,
     area: Rect,
-    groups: &[ShopeeStockGroup],
-    selected: usize,
+    groups: &[ShopeeStockParentGroup],
+    selected_cursor: usize,
 ) {
+    let mut cursor = 0usize;
     let rows = groups
         .iter()
-        .enumerate()
-        .flat_map(|(index, group)| {
-            let current = index == selected;
-            let warning = group
-                .warning
-                .as_deref()
-                .map(|warning| format!(" | {warning}"))
-                .unwrap_or_default();
-            let first_line = Line::from(vec![
+        .flat_map(|parent| {
+            let parent_cursor = cursor;
+            cursor += 1;
+            let current = parent_cursor == selected_cursor;
+            let marker = if parent.expanded { "[-]" } else { "[+]" };
+            let parent_line = Line::from(vec![
                 Span::styled(if current { "> " } else { "  " }, selected_style(current)),
-                Span::styled(group.sku.clone(), Style::default().fg(Color::Yellow)),
+                Span::styled(marker, Style::default().fg(Color::Cyan)),
+                Span::raw(" "),
+                Span::styled(parent.sku.clone(), Style::default().fg(Color::Yellow)),
                 Span::raw(format!(
-                    " | {} ocorr. | atual {} | {}{}",
-                    group.occurrences.len(),
-                    group.total_current_stock,
-                    group.target_label(),
-                    warning
+                    " | {} variacoes | atual {} | {}",
+                    parent.groups.len(),
+                    parent.total_current_stock,
+                    parent.name
                 )),
             ]);
-            let second_line = group
-                .occurrences
-                .first()
-                .map(|occurrence| {
-                    Line::from(format!(
-                        "    Ex: item {} model {} | {} | seller {} disp {} res {}",
-                        occurrence.item_id,
-                        occurrence.model_id,
-                        occurrence.name,
-                        occurrence.seller_stock,
-                        occurrence.available_stock,
-                        occurrence.reserved_stock
-                    ))
-                })
-                .unwrap_or_else(|| Line::from(""));
-            [first_line, second_line]
+            let mut lines = vec![parent_line];
+            if parent.expanded {
+                for group in &parent.groups {
+                    let child_cursor = cursor;
+                    cursor += 1;
+                    let current = child_cursor == selected_cursor;
+                    let warning = group
+                        .warning
+                        .as_deref()
+                        .map(|warning| format!(" | {warning}"))
+                        .unwrap_or_default();
+                    lines.push(Line::from(vec![
+                        Span::styled(if current { "> " } else { "  " }, selected_style(current)),
+                        Span::raw("    "),
+                        Span::styled(group.sku.clone(), Style::default().fg(Color::Green)),
+                        Span::raw(format!(
+                            " | {} ocorr. | atual {} | {}{}",
+                            group.occurrences.len(),
+                            group.total_current_stock,
+                            group.target_label(),
+                            warning
+                        )),
+                    ]));
+                    if let Some(occurrence) = group.occurrences.first() {
+                        lines.push(Line::from(format!(
+                            "       Ex: item {} model {} | seller {} disp {} res {}",
+                            occurrence.item_id,
+                            occurrence.model_id,
+                            occurrence.seller_stock,
+                            occurrence.available_stock,
+                            occurrence.reserved_stock
+                        )));
+                    }
+                }
+            }
+            lines
         })
         .collect::<Vec<_>>();
     let widget = Paragraph::new(Text::from(rows))
         .block(
             Block::default()
-                .title("Shopee > Estoque Online | Space 0/100 | Enter sincroniza SKU | R recarregar")
+                .title("Shopee > Estoque Online | Enter expande/sync | Space 0/100 | R recarregar")
                 .borders(Borders::ALL),
         )
         .wrap(Wrap { trim: false });
