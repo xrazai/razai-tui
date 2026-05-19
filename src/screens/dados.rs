@@ -144,13 +144,12 @@ fn render_cores(
     cores: &[CorRecord],
     delta_e_threshold: f64,
 ) {
+    let conflicts = closest_color_conflicts(cores, delta_e_threshold);
     let items = std::iter::once(ListItem::new("1. [Cadastrar Cor]")).chain(
         cores.iter().enumerate().map(|(index, cor)| {
             let hex = cor.codigo_hex.as_deref().unwrap_or("#");
             let sku = cor.sku.as_deref().unwrap_or("____-__");
-            let conflict = nearby_colors(hex, cores, Some(cor.id), delta_e_threshold)
-                .into_iter()
-                .next();
+            let conflict = conflicts.get(index).and_then(Option::as_ref);
             let mut spans = vec![
                 Span::raw(format!("{}. {} - ", index + 2, sku)),
                 color_swatch(hex),

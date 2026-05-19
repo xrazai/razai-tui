@@ -8,6 +8,7 @@ use ratatui::{
 
 use crate::{db::TecidoRecord, shopee::ShopeeStockParentGroup, ui::selected_style};
 
+#[allow(clippy::too_many_arguments)]
 pub fn render(
     frame: &mut Frame,
     area: Rect,
@@ -199,11 +200,7 @@ fn render_stock_groups(
         cursor.max(1)
     );
     let widget = Paragraph::new(Text::from(rows))
-        .block(
-            Block::default()
-                .title(title)
-                .borders(Borders::ALL),
-        )
+        .block(Block::default().title(title).borders(Borders::ALL))
         .scroll((scroll_offset as u16, 0))
         .wrap(Wrap { trim: false });
     frame.render_widget(widget, area);

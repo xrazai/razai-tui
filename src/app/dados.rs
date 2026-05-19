@@ -227,12 +227,12 @@ impl App {
             return;
         };
 
-        if let Some(pool) = &self.db_pool {
-            if let Err(error) = self.db_runtime.block_on(db::delete_tecido(pool, id)) {
-                self.db_status = format!("Erro ao excluir no banco: {error}");
-                self.pending_delete = false;
-                return;
-            }
+        if let Some(pool) = &self.db_pool
+            && let Err(error) = self.db_runtime.block_on(db::delete_tecido(pool, id))
+        {
+            self.db_status = format!("Erro ao excluir no banco: {error}");
+            self.pending_delete = false;
+            return;
         }
 
         self.reload_tecidos();
@@ -331,12 +331,12 @@ impl App {
             self.pending_delete = false;
             return;
         };
-        if let Some(pool) = &self.db_pool {
-            if let Err(error) = self.db_runtime.block_on(db::delete_cor(pool, id)) {
-                self.db_status = format!("Erro ao excluir cor: {error}");
-                self.pending_delete = false;
-                return;
-            }
+        if let Some(pool) = &self.db_pool
+            && let Err(error) = self.db_runtime.block_on(db::delete_cor(pool, id))
+        {
+            self.db_status = format!("Erro ao excluir cor: {error}");
+            self.pending_delete = false;
+            return;
         }
         self.reload_cores();
         self.db_status = String::from("Cor excluida do banco local");
@@ -412,12 +412,12 @@ impl App {
             self.pending_delete = false;
             return;
         };
-        if let Some(pool) = &self.db_pool {
-            if let Err(error) = self.db_runtime.block_on(db::delete_estampa(pool, id)) {
-                self.db_status = format!("Erro ao excluir estampa: {error}");
-                self.pending_delete = false;
-                return;
-            }
+        if let Some(pool) = &self.db_pool
+            && let Err(error) = self.db_runtime.block_on(db::delete_estampa(pool, id))
+        {
+            self.db_status = format!("Erro ao excluir estampa: {error}");
+            self.pending_delete = false;
+            return;
         }
         self.reload_estampas();
         self.db_status = String::from("Estampa excluida do banco local");

@@ -66,10 +66,7 @@ pub fn render_chat(
         ])
         .split(area);
 
-    let agent_panel = Paragraph::new(format!(
-        "Razai Master\nContexto: {}",
-        context.capability
-    ))
+    let agent_panel = Paragraph::new(format!("Razai Master\nContexto: {}", context.capability))
         .block(
             Block::default()
                 .title("Agente")
@@ -91,13 +88,14 @@ pub fn render_chat(
             .collect::<Vec<_>>()
             .join("\n\n")
     };
-    let messages = Paragraph::new(history).block(
-        Block::default()
-            .title("Chat")
-            .borders(Borders::ALL)
-            .border_style(selected_border_style),
-    )
-    .wrap(Wrap { trim: false });
+    let messages = Paragraph::new(history)
+        .block(
+            Block::default()
+                .title("Chat")
+                .borders(Borders::ALL)
+                .border_style(selected_border_style),
+        )
+        .wrap(Wrap { trim: false });
     frame.render_widget(messages, chunks[1]);
 
     let input_text = if chat.waiting && chat.input.is_empty() {
@@ -105,17 +103,14 @@ pub fn render_chat(
     } else {
         chat.input.clone()
     };
-    let input = Paragraph::new(Span::styled(
-        input_text,
-        Style::default().fg(Color::Yellow),
-    ))
-    .block(
-        Block::default()
-            .title("Mensagem")
-            .borders(Borders::ALL)
-            .border_style(selected_border_style),
-    )
-    .wrap(Wrap { trim: false });
+    let input = Paragraph::new(Span::styled(input_text, Style::default().fg(Color::Yellow)))
+        .block(
+            Block::default()
+                .title("Mensagem")
+                .borders(Borders::ALL)
+                .border_style(selected_border_style),
+        )
+        .wrap(Wrap { trim: false });
     frame.render_widget(input, chunks[2]);
 }
 

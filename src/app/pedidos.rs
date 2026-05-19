@@ -9,10 +9,7 @@ use crossterm::event::KeyCode;
 use windows::{
     Win32::{
         Foundation::HWND,
-        UI::{
-            Shell::ShellExecuteW,
-            WindowsAndMessaging::SW_SHOWNORMAL,
-        },
+        UI::{Shell::ShellExecuteW, WindowsAndMessaging::SW_SHOWNORMAL},
     },
     core::PCWSTR,
 };
@@ -319,7 +316,9 @@ impl App {
                     self.db_status = match self.abrir_compartilhamento_pedido(pedido_id, &path_text)
                     {
                         Ok(()) => {
-                            format!("Pedido #{pedido_id} gerado. Compartilhamento aberto: {path_text}")
+                            format!(
+                                "Pedido #{pedido_id} gerado. Compartilhamento aberto: {path_text}"
+                            )
                         }
                         Err(error) => format!("{error} PDF salvo em: {path_text}"),
                     };
@@ -533,7 +532,9 @@ impl App {
         if let Err(error) = abrir_compartilhamento_windows(path) {
             log_share_error(&format!("Pedido #{pedido_id}: {error}"));
             if let Err(fallback_error) = abrir_pdf_no_explorer(path) {
-                log_share_error(&format!("Pedido #{pedido_id} fallback Explorer: {fallback_error}"));
+                log_share_error(&format!(
+                    "Pedido #{pedido_id} fallback Explorer: {fallback_error}"
+                ));
                 return Err(format!(
                     "Nao foi possivel abrir o compartilhamento nativo. Fallback Explorer falhou: {fallback_error}."
                 ));
@@ -555,9 +556,9 @@ fn pedidos_pdf_dir() -> Result<PathBuf, String> {
 
 fn abrir_compartilhamento_windows(path: &str) -> Result<(), String> {
     log_share_debug("Normalizando caminho do PDF");
-    let path = Path::new(path).canonicalize().map_err(|error| {
-        format!("Nao foi possivel localizar o PDF do pedido: {error}")
-    })?;
+    let path = Path::new(path)
+        .canonicalize()
+        .map_err(|error| format!("Nao foi possivel localizar o PDF do pedido: {error}"))?;
     let verb = wide_null("share");
     let file = wide_null(&path.to_string_lossy());
     log_share_debug(&format!("Chamando ShellExecuteW share: {}", path.display()));
