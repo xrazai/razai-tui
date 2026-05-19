@@ -472,11 +472,32 @@ impl App {
             && self.pedido_resumo_focus
             && self.pedido_item_option < self.pedido_itens.len()
         {
+            let removed_index = self.pedido_item_option;
             self.pedido_itens.remove(self.pedido_item_option);
+            if let Some(pedido_id) = self.editing_pedido_id {
+                let Some(pool) = &self.db_pool else {
+                    self.db_status = String::from("Banco local indisponivel para salvar exclusao");
+                    return;
+                };
+                if let Err(error) = self.db_runtime.block_on(db::update_pedido_itens(
+                    pool,
+                    pedido_id,
+                    &self.pedido_itens,
+                )) {
+                    self.db_status = format!("Erro ao salvar exclusao do pedido: {error}");
+                    return;
+                }
+                self.reload_pedidos_historico();
+            }
             self.pedido_item_option = self
                 .pedido_item_option
                 .min(self.pedido_itens.len().saturating_sub(1));
             self.pedido_resumo_focus = !self.pedido_itens.is_empty();
+            self.db_status = if self.editing_pedido_id.is_some() {
+                format!("Item {} removido do pedido e salvo", removed_index + 1)
+            } else {
+                format!("Item {} removido do pedido", removed_index + 1)
+            };
         }
     }
 
