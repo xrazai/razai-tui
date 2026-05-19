@@ -25,7 +25,9 @@ O estoque somado atual do SKU Pai e da variacao e mostrado apenas como referenci
 
 ## Regra de agrupamento hierarquico
 
-- Itens com variacao usam `item_sku` como SKU Pai e `model_sku` como SKU da variacao.
+- Itens com variacao usam `item_sku` como SKU Pai.
+- Quando `model_sku` vem com tamanho no prefixo, como `050-BORDO`, `1M-BORDO` ou `0,5M-BORDO`, o SKU da variacao de estoque vira apenas a cor (`BORDO`).
+- Quando `model_sku` nao tem prefixo de tamanho reconhecido, ele continua sendo usado inteiro.
 - Itens sem variacao usam `item_sku` como SKU Pai e tambem como SKU da variacao.
 - SKU e normalizado com `trim` e uppercase.
 - SKUs vazios nao entram no agrupamento.
@@ -39,4 +41,5 @@ O estoque somado atual do SKU Pai e da variacao e mostrado apenas como referenci
 - Item/modelo com um unico `location_id` preserva esse valor no update.
 - Item/modelo com multiplos `location_id` fica bloqueado para sync automatico.
 - Toda sincronizacao exige confirmacao antes de chamar a Shopee.
-- A confirmacao no TUI aplica somente a variacao selecionada, nunca o SKU Pai inteiro.
+- A confirmacao no TUI aplica somente a cor/SKU filho selecionado, nunca o SKU Pai inteiro.
+- Quando uma cor possui varios tamanhos na Shopee, a sincronizacao atualiza todos os modelos dessa cor, porque o corte por tamanho e tratado no pedido.
