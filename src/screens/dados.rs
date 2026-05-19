@@ -158,7 +158,10 @@ fn render_cores(
             ];
             if let Some(conflict) = conflict {
                 spans.push(Span::styled(
-                    format!(" * Conflito com {}", conflict.nome),
+                    format!(
+                        " * Conflito mais proximo: {} (Delta E {:.2})",
+                        conflict.nome, conflict.delta_e
+                    ),
                     Style::default().fg(Color::Red),
                 ));
             }
