@@ -36,6 +36,7 @@ const SHOPEE_FABRIC_CATEGORY_LABEL: &str = "Roupas Femininas > Tecidos > Outros"
 const SHOPEE_FABRIC_NCM: &str = "55161300";
 const SHOPEE_MAX_MODEL_PRICE_RATIO: f64 = 5.0;
 const SHOPEE_STOCK_FETCH_CONCURRENCY: usize = 8;
+const SHOPEE_MAX_TIER_OPTIONS: usize = 20;
 static CALLBACK_LISTENER_STARTED: AtomicBool = AtomicBool::new(false);
 
 #[derive(Clone)]
@@ -122,6 +123,7 @@ pub struct ShopeeListingUpdatePlan {
     pub missing_colors: Vec<String>,
     pub model_count: usize,
     pub blocked_reason: Option<String>,
+    needs_tier_update: bool,
     tier_variation: Vec<Value>,
     models_to_add: Vec<Value>,
 }
@@ -263,7 +265,7 @@ pub async fn apply_listing_update_plans(
     plans: &[ShopeeListingUpdatePlan],
 ) -> Result<ShopeeListingUpdateResult, ShopeeError> {
     let config = ShopeeConfig::from_env()?;
-    let tokens = ensure_connected(pool).await?;
+    let mut tokens = ensure_connected(pool).await?;
     let mut result = ShopeeListingUpdateResult::default();
 
     for plan in plans {
@@ -283,6 +285,18 @@ pub async fn apply_listing_update_plans(
             Ok(added) => {
                 result.updated_items += 1;
                 result.added_models += added;
+            }
+            Err(error) if error.is_token_error() => {
+                tokens = refresh_tokens(pool, &config, &tokens).await?;
+                match apply_single_listing_update(&config, &tokens, plan).await {
+                    Ok(added) => {
+                        result.updated_items += 1;
+                        result.added_models += added;
+                    }
+                    Err(error) => result
+                        .failed
+                        .push(format!("item {}: {error}", plan.item_id)),
+                }
             }
             Err(error) => result
                 .failed
@@ -677,16 +691,18 @@ async fn apply_single_listing_update(
     tokens: &ShopeeTokens,
     plan: &ShopeeListingUpdatePlan,
 ) -> Result<usize, ShopeeError> {
-    let update_body = json!({
-        "item_id": plan.item_id,
-        "tier_variation": plan.tier_variation
-    });
-    let update_value = post_json(
-        signed_shop_url(config, tokens, "/api/v2/product/update_tier_variation", &[]),
-        &update_body,
-    )
-    .await?;
-    ensure_no_api_error(&update_value)?;
+    if plan.needs_tier_update {
+        let update_body = json!({
+            "item_id": plan.item_id,
+            "tier_variation": plan.tier_variation
+        });
+        let update_value = post_json(
+            signed_shop_url(config, tokens, "/api/v2/product/update_tier_variation", &[]),
+            &update_body,
+        )
+        .await?;
+        ensure_no_api_error(&update_value)?;
+    }
 
     let mut added = 0usize;
     for chunk in plan.models_to_add.chunks(50) {
@@ -1180,25 +1196,34 @@ fn build_listing_update_plan(
         ));
     }
 
-    let remote_model_skus = remote_model_skus(model_response);
-    let missing_colors =
-        missing_listing_colors(vinculos, local_colors, &existing_colors, &remote_model_skus);
-    if missing_colors.is_empty() {
-        return Ok(ShopeeListingUpdatePlan {
+    if existing_colors.len() > SHOPEE_MAX_TIER_OPTIONS || sizes.len() > SHOPEE_MAX_TIER_OPTIONS {
+        return Ok(blocked_listing_update_plan(
             item_id,
-            item_name: item_name.to_string(),
-            parent_sku: parent_sku.to_string(),
-            existing_color_count: existing_colors.len(),
-            size_count: sizes.len(),
-            missing_colors,
-            model_count: 0,
-            blocked_reason: None,
-            tier_variation: tiers.clone(),
-            models_to_add: Vec::new(),
-        });
+            item_name,
+            parent_sku,
+            "tier de cor ou tamanho excede 20 opcoes",
+        ));
     }
 
-    let final_model_count = (existing_colors.len() + missing_colors.len()) * sizes.len();
+    let remote_models = remote_listing_models(model_response);
+    let color_matches =
+        listing_color_matches(vinculos, local_colors, &existing_colors, &remote_models);
+    let missing_colors = color_matches
+        .iter()
+        .filter(|match_info| match_info.is_new_color)
+        .map(|match_info| match_info.color.clone())
+        .collect::<Vec<_>>();
+    let final_color_count = existing_colors.len() + missing_colors.len();
+    if final_color_count > SHOPEE_MAX_TIER_OPTIONS {
+        return Ok(blocked_listing_update_plan(
+            item_id,
+            item_name,
+            parent_sku,
+            "total de cores passaria de 20 opcoes",
+        ));
+    }
+
+    let final_model_count = final_color_count * sizes.len();
     if final_model_count > 100 {
         return Ok(blocked_listing_update_plan(
             item_id,
@@ -1235,15 +1260,8 @@ fn build_listing_update_plan(
     }
 
     let mut models_to_add = Vec::new();
-    for (missing_index, color) in missing_colors.iter().enumerate() {
-        let Some((_, vinculo)) = vinculos
-            .iter()
-            .enumerate()
-            .find(|(index, _)| local_colors.get(*index) == Some(color))
-        else {
-            continue;
-        };
-        let color_index = existing_colors.len() + missing_index;
+    for match_info in &color_matches {
+        let vinculo = &vinculos[match_info.vinculo_index];
         let model_sku = vinculo
             .sku
             .as_deref()
@@ -1251,11 +1269,17 @@ fn build_listing_update_plan(
             .unwrap_or(&tecido.sku)
             .to_string();
         for (size_index, size) in sizes.iter().enumerate() {
+            if remote_models
+                .iter()
+                .any(|model| model.tier_index == [match_info.color_index, size_index])
+            {
+                continue;
+            }
             let meters = parse_listing_size_meters(size).ok_or_else(|| {
                 ShopeeError::Api(format!("tamanho Shopee invalido para peso: {size}"))
             })?;
             models_to_add.push(json!({
-                "tier_index": [color_index, size_index],
+                "tier_index": [match_info.color_index, size_index],
                 "original_price": size_prices[size_index],
                 "model_sku": model_sku,
                 "seller_stock": [{"stock": 1}],
@@ -1264,6 +1288,22 @@ fn build_listing_update_plan(
                 "dimension": {"package_height": 10, "package_width": 30, "package_length": 30}
             }));
         }
+    }
+
+    if models_to_add.is_empty() {
+        return Ok(ShopeeListingUpdatePlan {
+            item_id,
+            item_name: item_name.to_string(),
+            parent_sku: parent_sku.to_string(),
+            existing_color_count: existing_colors.len(),
+            size_count: sizes.len(),
+            missing_colors,
+            model_count: 0,
+            blocked_reason: None,
+            needs_tier_update: false,
+            tier_variation: tiers.clone(),
+            models_to_add,
+        });
     }
 
     Ok(ShopeeListingUpdatePlan {
@@ -1275,6 +1315,9 @@ fn build_listing_update_plan(
         missing_colors,
         model_count: models_to_add.len(),
         blocked_reason: None,
+        needs_tier_update: color_matches
+            .iter()
+            .any(|match_info| match_info.is_new_color),
         tier_variation,
         models_to_add,
     })
@@ -1295,6 +1338,7 @@ fn blocked_listing_update_plan(
         missing_colors: Vec::new(),
         model_count: 0,
         blocked_reason: Some(reason.to_string()),
+        needs_tier_update: false,
         tier_variation: Vec::new(),
         models_to_add: Vec::new(),
     }
@@ -1365,55 +1409,113 @@ fn remote_model_price(model: &Value) -> Option<f64> {
         .or_else(|| model.get("original_price").and_then(Value::as_f64))
 }
 
-fn missing_listing_colors(
-    vinculos: &[VinculoRecord],
-    local_colors: &[String],
-    existing_colors: &[String],
-    remote_model_skus: &[String],
-) -> Vec<String> {
-    vinculos
-        .iter()
-        .zip(local_colors.iter())
-        .filter(|(vinculo, color)| {
-            !listing_link_exists(vinculo, color, existing_colors, remote_model_skus)
-        })
-        .map(|(_, color)| color.clone())
-        .collect()
+#[derive(Clone, Debug)]
+struct RemoteListingModel {
+    tier_index: [usize; 2],
+    model_sku: Option<String>,
 }
 
-fn listing_link_exists(
-    vinculo: &VinculoRecord,
-    color: &str,
-    existing_colors: &[String],
-    remote_model_skus: &[String],
-) -> bool {
-    let sku_matches = vinculo
-        .sku
-        .as_deref()
-        .and_then(normalize_sku)
-        .is_some_and(|sku| {
-            remote_model_skus
-                .iter()
-                .any(|remote_sku| remote_sku == &sku)
-        });
-    if sku_matches {
-        return true;
-    }
-
-    existing_colors
-        .iter()
-        .any(|existing| normalized_label(existing) == normalized_label(color))
+#[derive(Clone, Debug)]
+struct ListingColorMatch {
+    vinculo_index: usize,
+    color: String,
+    color_index: usize,
+    is_new_color: bool,
 }
 
-fn remote_model_skus(model_response: &Value) -> Vec<String> {
+fn remote_listing_models(model_response: &Value) -> Vec<RemoteListingModel> {
     model_response
         .get("model")
         .and_then(Value::as_array)
         .into_iter()
         .flatten()
-        .filter_map(|model| model.get("model_sku").and_then(Value::as_str))
-        .filter_map(normalize_sku)
+        .filter_map(|model| {
+            let indexes = model.get("tier_index")?.as_array()?;
+            let color_index = indexes
+                .first()
+                .and_then(Value::as_u64)
+                .and_then(|index| usize::try_from(index).ok())?;
+            let size_index = indexes
+                .get(1)
+                .and_then(Value::as_u64)
+                .and_then(|index| usize::try_from(index).ok())?;
+            Some(RemoteListingModel {
+                tier_index: [color_index, size_index],
+                model_sku: model
+                    .get("model_sku")
+                    .and_then(Value::as_str)
+                    .and_then(normalize_sku),
+            })
+        })
         .collect()
+}
+
+fn listing_color_matches(
+    vinculos: &[VinculoRecord],
+    local_colors: &[String],
+    existing_colors: &[String],
+    remote_models: &[RemoteListingModel],
+) -> Vec<ListingColorMatch> {
+    let mut matches = Vec::new();
+    let mut next_new_color_index = existing_colors.len();
+
+    for (vinculo_index, (vinculo, color)) in vinculos.iter().zip(local_colors.iter()).enumerate() {
+        if let Some(color_index) = color_index_by_sku(vinculo, remote_models) {
+            matches.push(ListingColorMatch {
+                vinculo_index,
+                color: color.clone(),
+                color_index,
+                is_new_color: false,
+            });
+            continue;
+        }
+
+        if let Some(color_index) = existing_colors
+            .iter()
+            .position(|existing| normalized_label(existing) == normalized_label(color))
+        {
+            matches.push(ListingColorMatch {
+                vinculo_index,
+                color: color.clone(),
+                color_index,
+                is_new_color: false,
+            });
+            continue;
+        }
+
+        matches.push(ListingColorMatch {
+            vinculo_index,
+            color: color.clone(),
+            color_index: next_new_color_index,
+            is_new_color: true,
+        });
+        next_new_color_index += 1;
+    }
+
+    matches
+}
+
+fn color_index_by_sku(
+    vinculo: &VinculoRecord,
+    remote_models: &[RemoteListingModel],
+) -> Option<usize> {
+    let local_sku = vinculo.sku.as_deref().and_then(normalize_sku)?;
+    remote_models
+        .iter()
+        .find(|model| {
+            model
+                .model_sku
+                .as_deref()
+                .is_some_and(|remote_sku| listing_skus_match(&local_sku, remote_sku))
+        })
+        .map(|model| model.tier_index[0])
+}
+
+fn listing_skus_match(local_sku: &str, remote_sku: &str) -> bool {
+    local_sku == remote_sku
+        || stock_child_sku_from_model_sku(local_sku).as_deref() == Some(remote_sku)
+        || stock_child_sku_from_model_sku(remote_sku).as_deref() == Some(local_sku)
+        || stock_child_sku_from_model_sku(local_sku) == stock_child_sku_from_model_sku(remote_sku)
 }
 
 fn normalized_label(value: &str) -> String {
@@ -2742,6 +2844,121 @@ mod tests {
         assert_eq!(plan.missing_colors, vec![String::from("Bordo")]);
         assert_eq!(plan.model_count, 1);
         assert_eq!(plan.models_to_add[0]["model_sku"], json!("ANAR-BORDO"));
+    }
+
+    #[test]
+    fn listing_update_adds_missing_model_when_color_already_exists() {
+        let tecido = test_tecido(300);
+        let vinculos = vec![test_vinculo(&tecido, 1, "Bordo", "ANAR-BORDO")];
+        let local_colors = listing_colors(&vinculos).unwrap();
+        let response = json!({
+            "tier_variation": [
+                {"name": "Cor", "option_list": [
+                    {"option": "Bordo", "image": {"image_id": "img1"}},
+                    {"option": "Azul", "image": {"image_id": "img1"}}
+                ]},
+                {"name": "Tamanho", "option_list": [
+                    {"option": "0,5m"},
+                    {"option": "1m"}
+                ]}
+            ],
+            "model": [
+                {"model_id": 10, "tier_index": [0, 0], "model_sku": "ANAR-BORDO", "price_info": [{"original_price": 12.5}]},
+                {"model_id": 11, "tier_index": [1, 0], "model_sku": "ANAR-AZUL", "price_info": [{"original_price": 12.5}]},
+                {"model_id": 12, "tier_index": [1, 1], "model_sku": "ANAR-AZUL", "price_info": [{"original_price": 25.0}]}
+            ]
+        });
+
+        let plan = build_listing_update_plan(
+            &tecido,
+            &vinculos,
+            &local_colors,
+            100,
+            "Anarruga",
+            "ANAR",
+            &response,
+        )
+        .unwrap();
+
+        assert!(plan.missing_colors.is_empty());
+        assert!(!plan.needs_tier_update);
+        assert_eq!(plan.model_count, 1);
+        assert_eq!(plan.models_to_add[0]["tier_index"], json!([0, 1]));
+        assert_eq!(plan.models_to_add[0]["original_price"], json!(25.0));
+    }
+
+    #[test]
+    fn listing_update_sku_match_ignores_remote_size_prefix() {
+        let tecido = test_tecido(300);
+        let vinculos = vec![test_vinculo(&tecido, 1, "Bordo Local", "BORDO")];
+        let local_colors = listing_colors(&vinculos).unwrap();
+        let response = json!({
+            "tier_variation": [
+                {"name": "Cor", "option_list": [
+                    {"option": "Bordo Shopee", "image": {"image_id": "img1"}}
+                ]},
+                {"name": "Tamanho", "option_list": [
+                    {"option": "1m"}
+                ]}
+            ],
+            "model": [
+                {"model_id": 10, "tier_index": [0, 0], "model_sku": "1M-BORDO", "price_info": [{"original_price": 25.0}]}
+            ]
+        });
+
+        let plan = build_listing_update_plan(
+            &tecido,
+            &vinculos,
+            &local_colors,
+            100,
+            "Anarruga",
+            "ANAR",
+            &response,
+        )
+        .unwrap();
+
+        assert!(plan.missing_colors.is_empty());
+        assert_eq!(plan.model_count, 0);
+    }
+
+    #[test]
+    fn listing_update_blocks_when_color_options_exceed_twenty() {
+        let tecido = test_tecido(300);
+        let vinculos = (0..21)
+            .map(|index| test_vinculo(&tecido, index, &format!("Cor {index}"), "ANAR-COR"))
+            .collect::<Vec<_>>();
+        let local_colors = listing_colors(&vinculos).unwrap();
+        let response = json!({
+            "tier_variation": [
+                {"name": "Cor", "option_list": []},
+                {"name": "Tamanho", "option_list": [
+                    {"option": "1m"}
+                ]}
+            ],
+            "model": []
+        });
+        let mut response = response;
+        response["tier_variation"][0]["option_list"] = json!(
+            (0..20)
+                .map(|index| json!({"option": format!("Remota {index}")}))
+                .collect::<Vec<_>>()
+        );
+
+        let plan = build_listing_update_plan(
+            &tecido,
+            &vinculos,
+            &local_colors,
+            100,
+            "Anarruga",
+            "ANAR",
+            &response,
+        )
+        .unwrap();
+
+        assert_eq!(
+            plan.blocked_reason.as_deref(),
+            Some("total de cores passaria de 20 opcoes")
+        );
     }
 
     #[test]
