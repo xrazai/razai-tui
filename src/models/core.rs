@@ -5,6 +5,16 @@ pub enum Focus {
     Chat,
 }
 
+#[derive(Clone, Copy, Default, Eq, PartialEq)]
+pub enum PedidosScreen {
+    #[default]
+    Menu,
+    SelecionarTecido,
+    SelecionarVinculo,
+    Lancamento,
+    Historico,
+}
+
 impl Focus {
     pub fn next(self) -> Self {
         match self {
@@ -29,6 +39,7 @@ impl Focus {
 pub struct ChatState {
     pub input: String,
     pub messages: Vec<ChatMessage>,
+    pub waiting: bool,
 }
 
 pub struct ChatMessage {
@@ -43,6 +54,9 @@ pub enum AgentAction {
         composicao: String,
         largura: String,
         tipo: Option<String>,
+        rendimento: Option<String>,
+        gramatura_linear: Option<String>,
+        gramatura_m2: Option<String>,
     },
     CreateCor {
         nome: String,
@@ -64,6 +78,57 @@ pub enum AgentAction {
     },
     SelectPrinter {
         printer: String,
+    },
+    AddVendaItem {
+        tecido: String,
+        item: String,
+        preco: String,
+        quantidade: String,
+    },
+    AddPedidoItem {
+        tecido: String,
+        item: String,
+        preco: String,
+        quantidade: String,
+    },
+}
+
+#[derive(Clone)]
+pub enum AgentDraft {
+    CreateTecido {
+        nome: Option<String>,
+        composicao: Option<String>,
+        largura: Option<String>,
+        tipo: Option<String>,
+        rendimento: Option<String>,
+        gramatura_linear: Option<String>,
+        gramatura_m2: Option<String>,
+    },
+    CreateCor {
+        nome: Option<String>,
+        hex: Option<String>,
+    },
+    CreateEstampa {
+        nome: Option<String>,
+    },
+    CreateVinculo {
+        tecido: Option<String>,
+        item: Option<String>,
+    },
+    SelectPrinter {
+        printer: Option<String>,
+    },
+    AddVendaItem {
+        tecido: Option<String>,
+        item: Option<String>,
+        preco: Option<String>,
+        quantidade: Option<String>,
+    },
+    AddPedidoItem {
+        tecido: Option<String>,
+        item: Option<String>,
+        preco: Option<String>,
+        quantidade: Option<String>,
     },
 }
 

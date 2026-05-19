@@ -1,112 +1,117 @@
 use crate::models::{DadosOption, DadosScreen, Section, TecidoForm, VendasScreen};
 use serde::{Deserialize, Serialize};
+use std::time::Duration;
 
-pub struct SkillContext {
-    pub name: &'static str,
+pub struct AgentContext {
+    pub capability: &'static str,
     pub description: &'static str,
 }
 
-pub fn active_skill(
+pub fn active_context(
     section: Section,
     dados_screen: DadosScreen,
     dados_option: DadosOption,
     vendas_screen: VendasScreen,
-) -> SkillContext {
+) -> AgentContext {
     match (section, dados_screen, dados_option, vendas_screen) {
-        (Section::Dados, DadosScreen::CadastrarTecido, _, _) => SkillContext {
-            name: "dados.tecidos.cadastro",
+        (Section::Dados, DadosScreen::CadastrarTecido, _, _) => AgentContext {
+            capability: "dados.tecidos.cadastro",
             description: "Ajuda no cadastro de tecidos, validacao de campos, SKU e calculos de gramatura.",
         },
-        (Section::Dados, DadosScreen::Tecidos, _, _) => SkillContext {
-            name: "dados.tecidos.lista",
+        (Section::Dados, DadosScreen::Tecidos, _, _) => AgentContext {
+            capability: "dados.tecidos.lista",
             description: "Ajuda a consultar tecidos cadastrados e iniciar novos cadastros.",
         },
-        (Section::Dados, DadosScreen::Cores, _, _) => SkillContext {
-            name: "dados.cores.lista",
+        (Section::Dados, DadosScreen::Cores, _, _) => AgentContext {
+            capability: "dados.cores.lista",
             description: "Ajuda a consultar cores cadastradas e iniciar novos cadastros.",
         },
-        (Section::Dados, DadosScreen::CadastrarCor, _, _) => SkillContext {
-            name: "dados.cores.cadastro",
+        (Section::Dados, DadosScreen::CadastrarCor, _, _) => AgentContext {
+            capability: "dados.cores.cadastro",
             description: "Ajuda no cadastro de cores, validacao de hexadecimal e nome.",
         },
-        (Section::Dados, DadosScreen::Estampas, _, _) => SkillContext {
-            name: "dados.estampas.lista",
+        (Section::Dados, DadosScreen::Estampas, _, _) => AgentContext {
+            capability: "dados.estampas.lista",
             description: "Ajuda a consultar estampas cadastradas e iniciar novos cadastros.",
         },
-        (Section::Dados, DadosScreen::CadastrarEstampa, _, _) => SkillContext {
-            name: "dados.estampas.cadastro",
+        (Section::Dados, DadosScreen::CadastrarEstampa, _, _) => AgentContext {
+            capability: "dados.estampas.cadastro",
             description: "Ajuda no cadastro de estampas e geracao automatica de SKU.",
         },
-        (Section::Dados, DadosScreen::VinculosMenu, _, _) => SkillContext {
-            name: "dados.vinculos.menu",
+        (Section::Dados, DadosScreen::VinculosMenu, _, _) => AgentContext {
+            capability: "dados.vinculos.menu",
             description: "Ajuda a escolher entre criar vinculos e consultar vinculos existentes.",
         },
-        (Section::Dados, DadosScreen::VinculosSelecionarTecidoCriar, _, _) => SkillContext {
-            name: "dados.vinculos.criar.tecido",
+        (Section::Dados, DadosScreen::VinculosSelecionarTecidoCriar, _, _) => AgentContext {
+            capability: "dados.vinculos.criar.tecido",
             description: "Ajuda a selecionar o tecido que recebera vinculos de cores ou estampas conforme o tipo.",
         },
-        (Section::Dados, DadosScreen::VinculosSelecionarCores, _, _) => SkillContext {
-            name: "dados.vinculos.criar.itens",
+        (Section::Dados, DadosScreen::VinculosSelecionarCores, _, _) => AgentContext {
+            capability: "dados.vinculos.criar.itens",
             description: "Ajuda a selecionar uma ou varias cores para tecido liso, ou estampas para tecido estampado.",
         },
-        (Section::Dados, DadosScreen::VinculosSelecionarTecidoVer, _, _) => SkillContext {
-            name: "dados.vinculos.ver.tecido",
+        (Section::Dados, DadosScreen::VinculosSelecionarTecidoVer, _, _) => AgentContext {
+            capability: "dados.vinculos.ver.tecido",
             description: "Ajuda a selecionar um tecido para consultar cores vinculadas.",
         },
-        (Section::Dados, DadosScreen::VinculosLista, _, _) => SkillContext {
-            name: "dados.vinculos.lista",
+        (Section::Dados, DadosScreen::VinculosLista, _, _) => AgentContext {
+            capability: "dados.vinculos.lista",
             description: "Ajuda a consultar os vinculos existentes de tecido com cor ou estampa.",
         },
-        (Section::Dados, DadosScreen::Menu, DadosOption::Tecido, _) => SkillContext {
-            name: "dados.tecidos",
+        (Section::Dados, DadosScreen::Menu, DadosOption::Tecido, _) => AgentContext {
+            capability: "dados.tecidos",
             description: "Ajuda com dados de tecidos.",
         },
-        (Section::Dados, DadosScreen::Menu, DadosOption::Cores, _) => SkillContext {
-            name: "dados.cores",
+        (Section::Dados, DadosScreen::Menu, DadosOption::Cores, _) => AgentContext {
+            capability: "dados.cores",
             description: "Ajuda com cadastro e consulta de cores.",
         },
-        (Section::Dados, DadosScreen::Menu, DadosOption::Estampas, _) => SkillContext {
-            name: "dados.estampas",
+        (Section::Dados, DadosScreen::Menu, DadosOption::Estampas, _) => AgentContext {
+            capability: "dados.estampas",
             description: "Ajuda com cadastro e consulta de estampas.",
         },
-        (Section::Dados, DadosScreen::Menu, DadosOption::Vinculos, _) => SkillContext {
-            name: "dados.vinculos",
+        (Section::Dados, DadosScreen::Menu, DadosOption::Vinculos, _) => AgentContext {
+            capability: "dados.vinculos",
             description: "Ajuda com vinculos entre tecidos e cores ou estampas.",
         },
-        (Section::Dashboard, _, _, _) => SkillContext {
-            name: "dashboard.master",
+        (Section::Dashboard, _, _, _) => AgentContext {
+            capability: "dashboard.master",
             description: "Agente mestre: consulta dados locais e prepara cadastros, vinculos, vendas, historico e configuracoes com confirmacao.",
         },
-        (Section::Vendas, _, _, VendasScreen::Menu) => SkillContext {
-            name: "vendas.menu",
+        (Section::Vendas, _, _, VendasScreen::Menu) => AgentContext {
+            capability: "vendas.menu",
             description: "Ajuda a iniciar uma nova venda ou consultar o historico de vendas.",
         },
-        (Section::Vendas, _, _, VendasScreen::SelecionarTecido) => SkillContext {
-            name: "vendas.nova.tecido",
+        (Section::Vendas, _, _, VendasScreen::SelecionarTecido) => AgentContext {
+            capability: "vendas.nova.tecido",
             description: "Ajuda a escolher o tecido da venda; o app decide cor ou estampa pelo tipo do tecido.",
         },
-        (Section::Vendas, _, _, VendasScreen::SelecionarVinculo) => SkillContext {
-            name: "vendas.nova.vinculo",
+        (Section::Vendas, _, _, VendasScreen::SelecionarVinculo) => AgentContext {
+            capability: "vendas.nova.vinculo",
             description: "Ajuda a escolher a cor vinculada para tecido liso ou a estampa vinculada para tecido estampado.",
         },
-        (Section::Vendas, _, _, VendasScreen::Lancamento) => SkillContext {
-            name: "vendas.nova.lancamento",
+        (Section::Vendas, _, _, VendasScreen::Lancamento) => AgentContext {
+            capability: "vendas.nova.lancamento",
             description: "Ajuda a lancar ou editar itens da venda, salvar, imprimir recibo ou excluir venda em edicao.",
         },
-        (Section::Vendas, _, _, VendasScreen::Historico) => SkillContext {
-            name: "vendas.historico",
+        (Section::Vendas, _, _, VendasScreen::Historico) => AgentContext {
+            capability: "vendas.historico",
             description: "Ajuda a filtrar vendas por periodo, consultar vendas anteriores e abrir uma venda para editar ou excluir.",
         },
-        (Section::Pedidos, _, _, _) => SkillContext {
-            name: "pedidos",
-            description: "Ajuda com acompanhamento de pedidos.",
+        (Section::Pedidos, _, _, _) => AgentContext {
+            capability: "pedidos",
+            description: "Ajuda a criar pedidos, gerar PDF, compartilhar pelo Windows, acompanhar pendencias e aprovar como venda.",
         },
-        (Section::Estoque, _, _, _) => SkillContext {
-            name: "estoque",
+        (Section::Estoque, _, _, _) => AgentContext {
+            capability: "estoque",
             description: "Ajuda com consulta e movimentacao de estoque.",
         },
-        (Section::Configuracoes, _, _, _) => SkillContext {
-            name: "configuracoes.impressora_recibo",
+        (Section::Shopee, _, _, _) => AgentContext {
+            capability: "shopee",
+            description: "Ajuda com rotinas e consultas relacionadas a Shopee.",
+        },
+        (Section::Configuracoes, _, _, _) => AgentContext {
+            capability: "configuracoes.impressora_recibo",
             description: "Ajuda a configurar a impressora termica 80mm para recibos de venda com envio direto.",
         },
     }
@@ -124,10 +129,13 @@ pub fn screen_context(form: &TecidoForm) -> String {
     )
 }
 
-pub fn local_reply(skill: &SkillContext, user_message: &str, form: &TecidoForm) -> String {
-    let mut reply = format!("Skill ativa: {}. {}", skill.name, skill.description);
+pub fn local_reply(context: &AgentContext, user_message: &str, form: &TecidoForm) -> String {
+    let mut reply = format!(
+        "Razai Master. Contexto atual: {}. {}",
+        context.capability, context.description
+    );
 
-    if skill.name == "dados.tecidos.cadastro" {
+    if context.capability == "dados.tecidos.cadastro" {
         reply.push_str(" Campos obrigatorios: Nome, Composicao e Largura.");
         if !form.largura.trim().is_empty() {
             reply.push_str(" Se largura e rendimento/gramatura estiverem preenchidos, o sistema calcula os campos derivados.");
@@ -143,16 +151,8 @@ pub fn local_reply(skill: &SkillContext, user_message: &str, form: &TecidoForm) 
     reply
 }
 
-pub async fn openrouter_reply(
-    skill: &SkillContext,
-    user_message: &str,
-    form: &TecidoForm,
-) -> Result<String, String> {
-    openrouter_reply_with_context(skill, user_message, &screen_context(form)).await
-}
-
 pub async fn openrouter_reply_with_context(
-    skill: &SkillContext,
+    context_info: &AgentContext,
     user_message: &str,
     context: &str,
 ) -> Result<String, String> {
@@ -161,8 +161,8 @@ pub async fn openrouter_reply_with_context(
     let model = std::env::var("OPENROUTER_MODEL")
         .unwrap_or_else(|_| String::from("anthropic/claude-sonnet-4.5"));
     let system_prompt = format!(
-        "Voce e um agente especialista da TUI Razai. Responda em portugues, curto e pratico.\nSkill ativa: {}\nDescricao: {}\nContexto disponivel: {}\nNao diga que executou alteracoes; qualquer gravacao exige confirmacao no app.",
-        skill.name, skill.description, context
+        "Voce e o Razai Master, agente unico da TUI Razai. Responda em portugues, curto e pratico.\nCapacidades disponiveis: tecidos, cores, estampas, vinculos, vendas, pedidos, configuracoes, estoque e Shopee.\nContexto atual da tela: {}\nDescricao do contexto: {}\nContexto disponivel: {}\nUse o contexto global do projeto mesmo quando estiver em uma tela especifica. Se o usuario quiser criar, configurar, vender, pedir ou vincular algo e faltar informacao obrigatoria, faca uma pergunta objetiva por vez em vez de inventar dados. Nao diga que executou alteracoes; qualquer gravacao exige confirmacao no app.",
+        context_info.capability, context_info.description, context
     );
     let request = ChatCompletionRequest {
         model,
@@ -180,7 +180,12 @@ pub async fn openrouter_reply_with_context(
         ],
     };
 
-    let response = reqwest::Client::new()
+    let client = reqwest::Client::builder()
+        .timeout(Duration::from_secs(45))
+        .build()
+        .map_err(|error| format!("Falha ao preparar cliente OpenRouter: {error}"))?;
+
+    let response = client
         .post("https://openrouter.ai/api/v1/chat/completions")
         .bearer_auth(api_key)
         .header("Content-Type", "application/json")

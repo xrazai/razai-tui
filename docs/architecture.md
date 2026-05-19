@@ -14,16 +14,19 @@ O projeto e uma TUI em Rust com `ratatui`, banco local PostgreSQL e chat lateral
 | `src/app/vendas/history.rs` | Filtro de periodo e abertura de vendas do historico. |
 | `src/app/vendas/receipt.rs` | Montagem e envio RAW/ESC-POS de recibos. |
 | `src/app/configuracoes.rs` | Eventos da aba Configuracoes e leitura de impressoras do Windows. |
+| `src/app/pedidos.rs` | Eventos da aba Pedidos, geracao de PDF e compartilhamento nativo do Windows. |
 | `src/screens/chrome.rs` | Header, tabs, footer e chat. |
 | `src/screens/dados.rs` | Renderizacao de listas da aba Dados. |
 | `src/screens/dados/forms.rs` | Renderizacao dos formularios de Dados. |
 | `src/screens/vendas.rs` | Renderizacao do fluxo de Vendas. |
 | `src/screens/configuracoes.rs` | Renderizacao da selecao de impressora. |
+| `src/screens/pedidos.rs` | Renderizacao do fluxo de Pedidos. |
 | `src/models.rs` | Enums, formularios e regras de calculo. |
 | `src/models/sku.rs` | Geracao de SKUs. |
 | `src/db.rs` | Queries e comandos PostgreSQL gerais. |
 | `src/db/sales.rs` | Persistencia de vendas, itens e historico. |
-| `src/agent.rs` | Skills do agente e chamada OpenRouter. |
+| `src/db/orders.rs` | Persistencia de pedidos pendentes, itens e aprovacao como venda. |
+| `src/agent.rs` | Contexto do Razai Master e chamada OpenRouter. |
 
 ## Limite de tamanho
 
@@ -40,7 +43,7 @@ Evitar arquivos com mais de 600 linhas. Se passar disso e houver um corte claro 
 
 ## Agente IA
 
-O Dashboard usa a skill `dashboard.master`, que combina contexto de dados, vendas, vinculos e configuracoes. Consultas locais podem ser respondidas diretamente. Acoes que gravam ou alteram dados ficam em `pending_agent_action` e so executam depois de confirmacao textual do usuario (`sim`/`nao`).
+O app usa um agente unico, o Razai Master. A tela atual define apenas o contexto/capacidade preferencial; o agente recebe contexto global de dados, vendas, pedidos, vinculos e configuracoes. Consultas locais podem ser respondidas diretamente. Acoes que gravam ou alteram dados ficam em `pending_agent_action` e so executam depois de confirmacao textual do usuario (`sim`/`nao`).
 
 Acoes mapeadas inicialmente:
 
@@ -69,3 +72,7 @@ Chaves atuais:
 A aba `Configuracoes` lista impressoras instaladas no Windows com `Get-Printer`. A impressora selecionada e salva no banco.
 
 Vendas finalizadas sao persistidas em `vendas` e `venda_itens`. O historico inicia filtrado pelo dia atual e permite ajustar `Data inicio` e `Data fim`. O `Resumo do pedido` so aparece no lancamento ou na edicao de uma venda aberta pelo historico; nele, lancamentos podem ser selecionados, editados individualmente ou excluidos com confirmacao. O envio de recibo 80mm usa impressao RAW/ESC-POS direto para a impressora configurada, sem abrir janela de impressao.
+
+## Pedidos
+
+Pedidos ficam persistidos em `pedidos` e `pedido_itens` com status `pendente` ou `aprovado`. Ao gerar um pedido, o app salva os itens, cria um PDF em `pdf_pedidos/` e abre o compartilhamento nativo do Windows com o PDF anexado. Ao aprovar um pedido pago, os itens sao registrados em `vendas` e o pedido passa para `aprovado`.

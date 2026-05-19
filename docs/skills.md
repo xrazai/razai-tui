@@ -1,61 +1,38 @@
-# Skills do agente
+# Capacidades do Razai Master
 
-Cada tela ativa uma skill para orientar o chat lateral. O codigo fica em `src/agent.rs`.
+O chat lateral usa um unico agente: **Razai Master**. A tela atual define apenas o contexto preferencial exibido no painel e enviado ao OpenRouter; o agente continua tendo acesso ao contexto global do projeto e as mesmas rotinas guiadas.
 
-## Globais
+## Capacidades
 
-| Tela | Skill | Objetivo |
-| --- | --- | --- |
-| Dashboard | `dashboard.master` | Consultar dados locais e preparar cadastros, vinculos, vendas, historico e configuracoes com confirmacao. |
-| Pedidos | `pedidos` | Acompanhar pedidos quando a tela for implementada. |
-| Estoque | `estoque` | Consultar e movimentar estoque quando a tela for implementada. |
-| Configuracoes | `configuracoes.impressora_recibo` | Configurar impressora termica 80mm para recibos com envio direto. |
+| Capacidade | Objetivo |
+| --- | --- |
+| `dashboard.master` | Consultar dados locais e preparar acoes de qualquer area com confirmacao. |
+| `dados.tecidos` | Criar, consultar e orientar cadastro de tecidos, incluindo SKU e calculos de rendimento/gramatura. |
+| `dados.cores` | Criar e consultar cores, validando hexadecimal e SKU. |
+| `dados.estampas` | Criar e consultar estampas com SKU automatico. |
+| `dados.vinculos` | Criar e consultar vinculos entre tecido e cor/estampa. |
+| `vendas` | Lançar itens, consultar historico, filtrar periodo e abrir venda por id. |
+| `pedidos` | Lançar itens, gerar PDF, compartilhar pelo Windows e aprovar pedido como venda. |
+| `configuracoes` | Selecionar impressora de recibos. |
+| `estoque` | Consultar e movimentar estoque quando a tela for implementada. |
+| `shopee` | Apoiar rotinas relacionadas a Shopee. |
 
-## Dados
+## Fluxos Guiados
 
-| Tela | Skill | Objetivo |
-| --- | --- | --- |
-| Dados menu em Tecido | `dados.tecidos` | Orientar o fluxo de tecidos. |
-| Lista de tecidos | `dados.tecidos.lista` | Consultar tecidos e iniciar cadastros. |
-| Cadastro/edicao de tecido | `dados.tecidos.cadastro` | Validar campos, SKU e calculos de rendimento/gramatura. |
-| Dados menu em Cores | `dados.cores` | Orientar o fluxo de cores. |
-| Lista de cores | `dados.cores.lista` | Consultar cores e iniciar cadastros. |
-| Cadastro/edicao de cor | `dados.cores.cadastro` | Validar hexadecimal, nome, swatch e SKU. |
-| Dados menu em Estampas | `dados.estampas` | Orientar o fluxo de estampas. |
-| Lista de estampas | `dados.estampas.lista` | Consultar estampas e iniciar cadastros. |
-| Cadastro/edicao de estampa | `dados.estampas.cadastro` | Validar nome e SKU automatico. |
-| Dados menu em Vinculos | `dados.vinculos` | Orientar vinculos entre tecido e cor/estampa. |
-| Menu de vinculos | `dados.vinculos.menu` | Escolher entre criar ou ver vinculos. |
-| Criar vinculos: selecionar tecido | `dados.vinculos.criar.tecido` | Selecionar tecido e determinar tipo de vinculo pelo tipo do tecido. |
-| Criar vinculos: selecionar itens | `dados.vinculos.criar.itens` | Marcar cores para tecido liso ou estampas para tecido estampado. |
-| Ver vinculos: selecionar tecido | `dados.vinculos.ver.tecido` | Selecionar tecido para consulta. |
-| Lista de vinculos | `dados.vinculos.lista` | Consultar cores ou estampas vinculadas ao tecido. |
+O agente pergunta uma informacao por vez quando faltam dados obrigatorios. Toda acao de escrita, vinculo, edicao, exclusao, impressao ou configuracao precisa de confirmacao textual antes de executar.
 
-## Vendas
-
-| Tela | Skill | Objetivo |
-| --- | --- | --- |
-| Menu de vendas | `vendas.menu` | Iniciar nova venda ou acessar historico. |
-| Nova venda: selecionar tecido | `vendas.nova.tecido` | Escolher tecido; o app decide cor ou estampa pelo tipo. |
-| Nova venda: selecionar vinculo | `vendas.nova.vinculo` | Escolher cor vinculada ou estampa vinculada. |
-| Nova venda/edicao: lancamento | `vendas.nova.lancamento` | Informar preco unitario, quantidade, editar lancamentos no resumo, salvar, imprimir ou excluir em edicao. |
-| Historico | `vendas.historico` | Filtrar vendas por periodo, consultar vendas anteriores e abrir uma venda para editar ou excluir. |
-
-## Dashboard master
-
-No Dashboard, a skill `dashboard.master` pode responder consultas locais e preparar acoes mapeadas. Toda acao de escrita, vinculo, edicao, exclusao, impressao ou configuracao precisa de confirmacao textual antes de executar.
-
-Acoes iniciais:
+Acoes locais ja mapeadas:
 
 - cadastrar tecido, cor e estampa;
 - criar vinculo tecido + cor/estampa;
+- lançar item de venda;
+- lançar item de pedido;
 - abrir venda por id;
 - filtrar historico por periodo;
 - selecionar impressora.
 
-## Regras de atualizacao
+## Regras de Atualizacao
 
-- Ao criar uma tela nova, adicionar uma skill especifica em `src/agent.rs`.
-- Ao alterar o fluxo de uma tela, atualizar a descricao da skill.
-- Ao alterar a matriz de skills, atualizar este documento.
-- Skills devem descrever a tarefa da tela, nao detalhes de teclado.
+- Ao criar uma tela nova, adicionar ou ajustar a capacidade correspondente em `src/agent.rs`.
+- Ao alterar um fluxo guiado, atualizar `src/app/agent_actions.rs`.
+- Ao alterar a matriz de capacidades, atualizar este documento.
