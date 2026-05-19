@@ -22,6 +22,7 @@ use crate::{
     },
     models::*,
     screens,
+    shopee,
     ui::SIDE_PANEL_WIDTH,
 };
 
@@ -107,6 +108,7 @@ pub struct App {
     pub finalizar_pedido_option: FinalizarVendaOption,
     pub pending_approve_pedido: bool,
     pub shopee_menu_option: usize,
+    pub shopee_status: String,
     pub printers: Vec<String>,
     pub printer_option: usize,
     pub selected_printer: Option<String>,
@@ -122,6 +124,7 @@ impl App {
         selected_printer: Option<String>,
         vendas_historico: Vec<VendaHistoricoRecord>,
         pedidos_historico: Vec<PedidoRecord>,
+        shopee_status: String,
         db_runtime: Runtime,
     ) -> Self {
         let printers = configuracoes::list_installed_printers();
@@ -210,6 +213,7 @@ impl App {
             finalizar_pedido_option: FinalizarVendaOption::default(),
             pending_approve_pedido: false,
             shopee_menu_option: 0,
+            shopee_status,
             printers,
             printer_option,
             selected_printer,
@@ -473,10 +477,16 @@ impl App {
                 self.shopee_menu_option = (self.shopee_menu_option + 1) % 2;
             }
             KeyCode::Enter => {
-                self.db_status = match self.shopee_menu_option {
-                    0 => String::from("Shopee > Criar anuncio ainda nao implementado"),
-                    _ => String::from("Shopee > Estoque Online ainda nao implementado"),
+                let status = match self.shopee_menu_option {
+                    0 => self
+                        .db_runtime
+                        .block_on(shopee::create_listing_status(self.db_pool.as_ref())),
+                    _ => self
+                        .db_runtime
+                        .block_on(shopee::online_stock_summary(self.db_pool.as_ref())),
                 };
+                self.shopee_status = status.clone();
+                self.db_status = status;
             }
             KeyCode::Char('1') => self.shopee_menu_option = 0,
             KeyCode::Char('2') => self.shopee_menu_option = 1,
@@ -511,6 +521,24 @@ impl App {
         if self.section == Section::Dashboard {
             self.submit_dashboard_agent_message(&message);
             return;
+        }
+
+        if self.section == Section::Shopee {
+            if let Some(code) = parse_shopee_code(&message) {
+                let reply = match self
+                    .db_runtime
+                    .block_on(shopee::exchange_code(self.db_pool.as_ref(), code))
+                {
+                    Ok(()) => {
+                        self.shopee_status = String::from("Shopee conectada; tokens salvos");
+                        self.db_status = self.shopee_status.clone();
+                        self.shopee_status.clone()
+                    }
+                    Err(error) => format!("Shopee: falha ao trocar code por tokens: {error}"),
+                };
+                self.chat.messages.push(ChatMessage::assistant(reply));
+                return;
+            }
         }
 
         if self.submit_context_agent_message(&message) {
@@ -677,7 +705,12 @@ impl App {
             Section::Vendas => screens::vendas::render(frame, body[0], self),
             Section::Pedidos => screens::pedidos::render(frame, body[0], self),
             Section::Dados => screens::dados::render(frame, body[0], self),
-            Section::Shopee => screens::shopee::render(frame, body[0], self.shopee_menu_option),
+            Section::Shopee => screens::shopee::render(
+                frame,
+                body[0],
+                self.shopee_menu_option,
+                &self.shopee_status,
+            ),
             Section::Configuracoes => screens::configuracoes::render(frame, body[0], self),
             section => screens::chrome::render_content(frame, body[0], section),
         }
@@ -712,4 +745,26 @@ fn empty_label(value: &str) -> &str {
     } else {
         value
     }
+}
+
+fn parse_shopee_code(message: &str) -> Option<&str> {
+    let message = message.trim();
+    for prefix in ["code=", "code:", "code "] {
+        if let Some(code) = message.strip_prefix(prefix) {
+            return non_empty_code(code);
+        }
+    }
+    if let Some((_, query)) = message.split_once('?') {
+        for part in query.split('&') {
+            if let Some(code) = part.strip_prefix("code=") {
+                return non_empty_code(code);
+            }
+        }
+    }
+    None
+}
+
+fn non_empty_code(code: &str) -> Option<&str> {
+    let code = code.trim();
+    (!code.is_empty()).then_some(code)
 }
