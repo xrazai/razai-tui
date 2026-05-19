@@ -64,11 +64,14 @@ fn main() -> io::Result<()> {
             .unwrap_or_default(),
         None => Vec::new(),
     };
+    let shopee_ngrok_status = shopee::ensure_ngrok_tunnel();
     let shopee_listener_status = shopee::start_callback_listener(pool.clone()).ok();
     let shopee_connection_status = db_runtime.block_on(shopee::startup_status(pool.as_ref()));
     let shopee_status = match shopee_listener_status {
-        Some(listener_status) => format!("{shopee_connection_status}\n{listener_status}"),
-        None => shopee_connection_status,
+        Some(listener_status) => {
+            format!("{shopee_connection_status}\n{shopee_ngrok_status}\n{listener_status}")
+        }
+        None => format!("{shopee_connection_status}\n{shopee_ngrok_status}"),
     };
 
     let mut terminal = setup_terminal()?;
