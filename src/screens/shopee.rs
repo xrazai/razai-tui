@@ -6,7 +6,11 @@ use ratatui::{
     widgets::{Block, Borders, List, ListItem, ListState, Paragraph, Wrap},
 };
 
-use crate::{db::TecidoRecord, shopee::ShopeeStockParentGroup, ui::selected_style};
+use crate::{
+    db::TecidoRecord,
+    shopee::{ShopeeListingUpdatePlan, ShopeeStockParentGroup},
+    ui::selected_style,
+};
 
 #[allow(clippy::too_many_arguments)]
 pub fn render(
@@ -18,6 +22,10 @@ pub fn render(
     listing_selected: usize,
     listing_price: &str,
     listing_confirm: bool,
+    update_active: bool,
+    update_selected: usize,
+    update_confirm: bool,
+    update_plans: &[ShopeeListingUpdatePlan],
     stock_groups: &[ShopeeStockParentGroup],
     stock_cursor: usize,
     stock_confirm: bool,
@@ -36,13 +44,27 @@ pub fn render(
             listing_price,
             listing_confirm,
         );
+    } else if selected == 2 && update_active {
+        render_update_form(
+            frame,
+            chunks[0],
+            tecidos,
+            update_selected,
+            update_confirm,
+            update_plans,
+        );
     } else if selected == 1 && !stock_groups.is_empty() {
         render_stock_groups(frame, chunks[0], stock_groups, stock_cursor);
     } else {
-        let items = ["Criar anuncio", "Estoque Online", "Guia Shopee BR"]
-            .iter()
-            .enumerate()
-            .map(|(index, item)| ListItem::new(format!("{}. {}", index + 1, item)));
+        let items = [
+            "Criar anuncio",
+            "Estoque Online",
+            "Atualizar anuncios",
+            "Guia Shopee BR",
+        ]
+        .iter()
+        .enumerate()
+        .map(|(index, item)| ListItem::new(format!("{}. {}", index + 1, item)));
         let mut state = ListState::default().with_selected(Some(selected));
         let list = List::new(items)
             .block(Block::default().title("Shopee").borders(Borders::ALL))
@@ -54,6 +76,8 @@ pub fn render(
 
     let status_text = if stock_confirm {
         format!("{status}\nEsta acao altera estoque na Shopee apenas para o SKU selecionado.")
+    } else if update_confirm {
+        format!("{status}\nEsta acao adiciona cores/modelos em anuncios existentes na Shopee.")
     } else {
         status.to_string()
     };
@@ -112,6 +136,89 @@ fn render_listing_form(
         .block(
             Block::default()
                 .title("Shopee > Criar anuncio")
+                .borders(Borders::ALL),
+        )
+        .wrap(Wrap { trim: false });
+    frame.render_widget(widget, area);
+}
+
+fn render_update_form(
+    frame: &mut Frame,
+    area: Rect,
+    tecidos: &[TecidoRecord],
+    selected: usize,
+    confirm: bool,
+    plans: &[ShopeeListingUpdatePlan],
+) {
+    let mut rows = vec![
+        Line::from("Atualiza anuncios existentes por SKU Pai (item_sku)."),
+        Line::from(
+            "Adiciona apenas cores locais faltantes, preservando tamanhos e precos remotos.",
+        ),
+        Line::from("Enter monta previa/confirma | Cima/Baixo seleciona tecido | Esc cancela"),
+        Line::from(""),
+    ];
+    if tecidos.is_empty() {
+        rows.push(Line::from("Nenhum tecido cadastrado."));
+    } else {
+        rows.extend(tecidos.iter().enumerate().map(|(index, tecido)| {
+            let current = index == selected;
+            Line::from(vec![
+                Span::styled(if current { "> " } else { "  " }, selected_style(current)),
+                Span::styled(tecido.sku.clone(), Style::default().fg(Color::Yellow)),
+                Span::raw(format!(" | {}", tecido.nome)),
+            ])
+        }));
+    }
+    if !plans.is_empty() {
+        rows.push(Line::from(""));
+        rows.push(Line::from("Previa:"));
+        for plan in plans.iter().take(8) {
+            let line = if let Some(reason) = &plan.blocked_reason {
+                format!(
+                    "! item {} | {} | bloqueado: {}",
+                    plan.item_id, plan.item_name, reason
+                )
+            } else if plan.model_count == 0 {
+                format!(
+                    "= item {} | SKU {} | {} | {} cores x {} tamanhos | sem novas cores",
+                    plan.item_id,
+                    plan.parent_sku,
+                    plan.item_name,
+                    plan.existing_color_count,
+                    plan.size_count
+                )
+            } else {
+                format!(
+                    "+ item {} | SKU {} | {} | {}+{} cores x {} tamanhos | {} modelos",
+                    plan.item_id,
+                    plan.parent_sku,
+                    plan.item_name,
+                    plan.existing_color_count,
+                    plan.missing_colors.len(),
+                    plan.size_count,
+                    plan.model_count
+                )
+            };
+            rows.push(Line::from(line));
+        }
+        if plans.len() > 8 {
+            rows.push(Line::from(format!(
+                "... {} anuncios a mais",
+                plans.len() - 8
+            )));
+        }
+    }
+    if confirm {
+        rows.push(Line::from(""));
+        rows.push(Line::from(
+            "Confirmar atualizacao real dos anuncios Shopee? Enter/S confirma; Esc/N cancela.",
+        ));
+    }
+    let widget = Paragraph::new(Text::from(rows))
+        .block(
+            Block::default()
+                .title("Shopee > Atualizar anuncios")
                 .borders(Borders::ALL),
         )
         .wrap(Wrap { trim: false });

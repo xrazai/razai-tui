@@ -120,6 +120,10 @@ pub struct App {
     pub shopee_listing_tecido_option: usize,
     pub shopee_listing_price: String,
     pub shopee_listing_confirm: bool,
+    pub shopee_update_active: bool,
+    pub shopee_update_tecido_option: usize,
+    pub shopee_update_confirm: bool,
+    pub shopee_update_plans: Vec<shopee::ShopeeListingUpdatePlan>,
     pub shopee_status: String,
     pub printers: Vec<String>,
     pub printer_option: usize,
@@ -236,6 +240,10 @@ impl App {
             shopee_listing_tecido_option: 0,
             shopee_listing_price: String::new(),
             shopee_listing_confirm: false,
+            shopee_update_active: false,
+            shopee_update_tecido_option: 0,
+            shopee_update_confirm: false,
+            shopee_update_plans: Vec::new(),
             shopee_status,
             printers,
             printer_option,
@@ -495,6 +503,20 @@ impl App {
     }
 
     fn handle_shopee_key(&mut self, key: KeyCode) {
+        if self.shopee_update_confirm {
+            match key {
+                KeyCode::Esc | KeyCode::Char('n') | KeyCode::Char('N') => {
+                    self.shopee_update_confirm = false;
+                    self.shopee_status = String::from("Atualizacao de anuncios cancelada.");
+                }
+                KeyCode::Enter | KeyCode::Char('s') | KeyCode::Char('S') => {
+                    self.apply_selected_shopee_listing_updates();
+                }
+                _ => {}
+            }
+            return;
+        }
+
         if self.shopee_listing_confirm {
             match key {
                 KeyCode::Esc | KeyCode::Char('n') | KeyCode::Char('N') => {
@@ -504,6 +526,33 @@ impl App {
                 KeyCode::Enter | KeyCode::Char('s') | KeyCode::Char('S') => {
                     self.create_selected_shopee_listing();
                 }
+                _ => {}
+            }
+            return;
+        }
+
+        if self.shopee_update_active {
+            match key {
+                KeyCode::Esc => {
+                    self.shopee_update_active = false;
+                    self.shopee_update_confirm = false;
+                    self.shopee_update_plans.clear();
+                    self.shopee_status = String::from("Atualizacao de anuncios cancelada.");
+                }
+                KeyCode::Left => self.section = self.section.previous(),
+                KeyCode::Right => self.section = self.section.next(),
+                KeyCode::Up if !self.tecidos.is_empty() => {
+                    self.shopee_update_tecido_option =
+                        (self.shopee_update_tecido_option + self.tecidos.len() - 1)
+                            % self.tecidos.len();
+                    self.shopee_update_plans.clear();
+                }
+                KeyCode::Down if !self.tecidos.is_empty() => {
+                    self.shopee_update_tecido_option =
+                        (self.shopee_update_tecido_option + 1) % self.tecidos.len();
+                    self.shopee_update_plans.clear();
+                }
+                KeyCode::Enter => self.preview_selected_shopee_listing_updates(),
                 _ => {}
             }
             return;
@@ -607,9 +656,9 @@ impl App {
                     }
                 } else {
                     self.shopee_menu_option = if key == KeyCode::Up {
-                        (self.shopee_menu_option + 2) % 3
+                        (self.shopee_menu_option + 3) % 4
                     } else {
-                        (self.shopee_menu_option + 1) % 3
+                        (self.shopee_menu_option + 1) % 4
                     };
                 }
             }
@@ -629,6 +678,7 @@ impl App {
                 let status = match self.shopee_menu_option {
                     0 => {
                         self.shopee_listing_active = true;
+                        self.shopee_update_active = false;
                         self.shopee_listing_tecido_option = 0;
                         self.shopee_listing_price.clear();
                         self.shopee_listing_confirm = false;
@@ -684,6 +734,16 @@ impl App {
                         }
                         None => String::from("Carregue o estoque Shopee antes de sincronizar."),
                     },
+                    2 => {
+                        self.shopee_update_active = true;
+                        self.shopee_listing_active = false;
+                        self.shopee_update_tecido_option = 0;
+                        self.shopee_update_confirm = false;
+                        self.shopee_update_plans.clear();
+                        String::from(
+                            "Selecione o tecido para atualizar anuncios Shopee por SKU Pai.",
+                        )
+                    }
                     _ => shopee::listing_guide_status(),
                 };
                 self.shopee_status = status.clone();
@@ -692,6 +752,7 @@ impl App {
             KeyCode::Char('1') => self.shopee_menu_option = 0,
             KeyCode::Char('2') => self.shopee_menu_option = 1,
             KeyCode::Char('3') => self.shopee_menu_option = 2,
+            KeyCode::Char('4') => self.shopee_menu_option = 3,
             KeyCode::Char('r') | KeyCode::Char('R') => {
                 self.shopee_stock_groups.clear();
                 self.shopee_stock_cursor = 0;
@@ -815,6 +876,105 @@ impl App {
             Err(error) => format!("Shopee: falha ao criar anuncio: {error}"),
         };
         self.shopee_listing_confirm = false;
+        self.shopee_status = status.clone();
+        self.db_status = status;
+    }
+
+    fn preview_selected_shopee_listing_updates(&mut self) {
+        let Some(tecido) = self.tecidos.get(self.shopee_update_tecido_option).cloned() else {
+            self.shopee_status = String::from("Nenhum tecido selecionado.");
+            return;
+        };
+        let vinculos_result = match tecido.tipo.as_str() {
+            "Estampado" => self.db_pool.as_ref().map(|pool| {
+                self.db_runtime
+                    .block_on(db::list_estampa_vinculos_by_tecido(pool, tecido.id))
+            }),
+            _ => self.db_pool.as_ref().map(|pool| {
+                self.db_runtime
+                    .block_on(db::list_vinculos_by_tecido(pool, tecido.id))
+            }),
+        };
+        let Some(vinculos_result) = vinculos_result else {
+            self.shopee_status = String::from("Banco local indisponivel para carregar vinculos.");
+            return;
+        };
+        let vinculos = match vinculos_result {
+            Ok(vinculos) => vinculos,
+            Err(error) => {
+                self.shopee_status = format!("Falha ao carregar vinculos do tecido: {error}");
+                return;
+            }
+        };
+
+        match self.db_runtime.block_on(shopee::preview_listing_updates(
+            self.db_pool.as_ref(),
+            &tecido,
+            &vinculos,
+        )) {
+            Ok(plans) => {
+                let updatable = plans
+                    .iter()
+                    .filter(|plan| plan.blocked_reason.is_none() && plan.model_count > 0)
+                    .count();
+                let models = plans.iter().map(|plan| plan.model_count).sum::<usize>();
+                let blocked = plans
+                    .iter()
+                    .filter(|plan| plan.blocked_reason.is_some())
+                    .count();
+                self.shopee_update_plans = plans;
+                self.shopee_update_confirm = updatable > 0;
+                self.shopee_status = if self.shopee_update_plans.is_empty() {
+                    format!(
+                        "Nenhum anuncio Shopee encontrado para SKU Pai {}.",
+                        tecido.sku
+                    )
+                } else if updatable > 0 {
+                    format!(
+                        "Previa pronta para SKU {}: {} anuncios atualizaveis, {} modelos novos, {} bloqueados. Enter/S confirma; Esc/N cancela.",
+                        tecido.sku, updatable, models, blocked
+                    )
+                } else {
+                    format!(
+                        "Previa pronta para SKU {}: nenhum modelo novo para adicionar; {} bloqueados.",
+                        tecido.sku, blocked
+                    )
+                };
+            }
+            Err(error) => {
+                self.shopee_status = format!("Shopee: falha ao montar previa: {error}");
+            }
+        }
+        self.db_status = self.shopee_status.clone();
+    }
+
+    fn apply_selected_shopee_listing_updates(&mut self) {
+        if self.shopee_update_plans.is_empty() {
+            self.shopee_status = String::from("Nao ha previa de atualizacao para aplicar.");
+            self.shopee_update_confirm = false;
+            return;
+        }
+        let status = match self.db_runtime.block_on(shopee::apply_listing_update_plans(
+            self.db_pool.as_ref(),
+            &self.shopee_update_plans,
+        )) {
+            Ok(result) => format!(
+                "Atualizacao Shopee concluida. Anuncios: {}. Modelos adicionados: {}. Ignorados: {}. Falhas: {}{}",
+                result.updated_items,
+                result.added_models,
+                result.skipped_items,
+                result.failed.len(),
+                if result.failed.is_empty() {
+                    String::new()
+                } else {
+                    format!(". {}", result.failed.join(" | "))
+                }
+            ),
+            Err(error) => format!("Shopee: falha ao atualizar anuncios: {error}"),
+        };
+        self.shopee_update_confirm = false;
+        self.shopee_update_active = false;
+        self.shopee_update_plans.clear();
         self.shopee_status = status.clone();
         self.db_status = status;
     }
@@ -1051,6 +1211,10 @@ impl App {
                 self.shopee_listing_tecido_option,
                 &self.shopee_listing_price,
                 self.shopee_listing_confirm,
+                self.shopee_update_active,
+                self.shopee_update_tecido_option,
+                self.shopee_update_confirm,
+                &self.shopee_update_plans,
                 &self.shopee_stock_groups,
                 self.shopee_stock_cursor,
                 self.shopee_stock_confirm,

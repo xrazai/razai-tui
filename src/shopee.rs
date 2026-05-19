@@ -112,6 +112,28 @@ pub struct ShopeeListingModel {
     pub price: f64,
 }
 
+#[derive(Clone, Debug)]
+pub struct ShopeeListingUpdatePlan {
+    pub item_id: i64,
+    pub item_name: String,
+    pub parent_sku: String,
+    pub existing_color_count: usize,
+    pub size_count: usize,
+    pub missing_colors: Vec<String>,
+    pub model_count: usize,
+    pub blocked_reason: Option<String>,
+    tier_variation: Vec<Value>,
+    models_to_add: Vec<Value>,
+}
+
+#[derive(Clone, Debug, Default)]
+pub struct ShopeeListingUpdateResult {
+    pub updated_items: usize,
+    pub added_models: usize,
+    pub skipped_items: usize,
+    pub failed: Vec<String>,
+}
+
 impl ShopeeStockGroup {
     pub fn can_sync(&self) -> bool {
         self.warning.is_none()
@@ -222,6 +244,53 @@ pub async fn create_fabric_listing(
         }
         Err(error) => Err(error),
     }
+}
+
+pub async fn preview_listing_updates(
+    pool: Option<&PgPool>,
+    tecido: &TecidoRecord,
+    vinculos: &[VinculoRecord],
+) -> Result<Vec<ShopeeListingUpdatePlan>, ShopeeError> {
+    validate_listing_inputs(tecido, vinculos, 1.0)?;
+    let config = ShopeeConfig::from_env()?;
+    let tokens = ensure_connected(pool).await?;
+    let colors = listing_colors(vinculos)?;
+    preview_listing_updates_with_tokens(&config, &tokens, tecido, vinculos, &colors).await
+}
+
+pub async fn apply_listing_update_plans(
+    pool: Option<&PgPool>,
+    plans: &[ShopeeListingUpdatePlan],
+) -> Result<ShopeeListingUpdateResult, ShopeeError> {
+    let config = ShopeeConfig::from_env()?;
+    let tokens = ensure_connected(pool).await?;
+    let mut result = ShopeeListingUpdateResult::default();
+
+    for plan in plans {
+        if let Some(reason) = &plan.blocked_reason {
+            result.skipped_items += 1;
+            result
+                .failed
+                .push(format!("item {} bloqueado: {reason}", plan.item_id));
+            continue;
+        }
+        if plan.models_to_add.is_empty() {
+            result.skipped_items += 1;
+            continue;
+        }
+
+        match apply_single_listing_update(&config, &tokens, plan).await {
+            Ok(added) => {
+                result.updated_items += 1;
+                result.added_models += added;
+            }
+            Err(error) => result
+                .failed
+                .push(format!("item {}: {error}", plan.item_id)),
+        }
+    }
+
+    Ok(result)
 }
 
 pub async fn fetch_online_stock_groups(
@@ -551,6 +620,89 @@ async fn create_fabric_listing_with_tokens(
         model_count: models.len(),
         image_id,
     })
+}
+
+async fn preview_listing_updates_with_tokens(
+    config: &ShopeeConfig,
+    tokens: &ShopeeTokens,
+    tecido: &TecidoRecord,
+    vinculos: &[VinculoRecord],
+    local_colors: &[String],
+) -> Result<Vec<ShopeeListingUpdatePlan>, ShopeeError> {
+    let wanted_sku = normalize_sku(&tecido.sku).ok_or_else(|| {
+        ShopeeError::Api(String::from("SKU do tecido invalido para buscar anuncios"))
+    })?;
+    let item_ids = get_all_item_ids(config, tokens).await?;
+    let item_infos = get_all_item_base_infos(config, tokens, &item_ids).await?;
+    let mut plans = Vec::new();
+
+    for item in item_infos {
+        let Some(remote_sku) = item
+            .get("item_sku")
+            .and_then(Value::as_str)
+            .and_then(normalize_sku)
+        else {
+            continue;
+        };
+        if remote_sku != wanted_sku {
+            continue;
+        }
+
+        let item_id = item
+            .get("item_id")
+            .and_then(Value::as_i64)
+            .ok_or_else(|| ShopeeError::Api(String::from("item_id ausente em anuncio Shopee")))?;
+        let item_name = item
+            .get("item_name")
+            .and_then(Value::as_str)
+            .unwrap_or("Anuncio sem nome")
+            .to_string();
+        let models = get_model_list(config, tokens, item_id).await?;
+        plans.push(build_listing_update_plan(
+            tecido,
+            vinculos,
+            local_colors,
+            item_id,
+            &item_name,
+            &remote_sku,
+            &models,
+        )?);
+    }
+
+    Ok(plans)
+}
+
+async fn apply_single_listing_update(
+    config: &ShopeeConfig,
+    tokens: &ShopeeTokens,
+    plan: &ShopeeListingUpdatePlan,
+) -> Result<usize, ShopeeError> {
+    let update_body = json!({
+        "item_id": plan.item_id,
+        "tier_variation": plan.tier_variation
+    });
+    let update_value = post_json(
+        signed_shop_url(config, tokens, "/api/v2/product/update_tier_variation", &[]),
+        &update_body,
+    )
+    .await?;
+    ensure_no_api_error(&update_value)?;
+
+    let mut added = 0usize;
+    for chunk in plan.models_to_add.chunks(50) {
+        let body = json!({
+            "item_id": plan.item_id,
+            "model_list": chunk
+        });
+        let value = post_json(
+            signed_shop_url(config, tokens, "/api/v2/product/add_model", &[]),
+            &body,
+        )
+        .await?;
+        ensure_no_api_error(&value)?;
+        added += chunk.len();
+    }
+    Ok(added)
 }
 
 async fn get_all_item_ids(
@@ -969,6 +1121,263 @@ fn listing_models(
         }
     }
     Ok(models)
+}
+
+fn build_listing_update_plan(
+    tecido: &TecidoRecord,
+    vinculos: &[VinculoRecord],
+    local_colors: &[String],
+    item_id: i64,
+    item_name: &str,
+    parent_sku: &str,
+    model_response: &Value,
+) -> Result<ShopeeListingUpdatePlan, ShopeeError> {
+    let Some(tiers) = model_response
+        .get("tier_variation")
+        .and_then(Value::as_array)
+    else {
+        return Ok(blocked_listing_update_plan(
+            item_id,
+            item_name,
+            parent_sku,
+            "anuncio sem variacoes",
+        ));
+    };
+    if tiers.len() != 2 {
+        return Ok(blocked_listing_update_plan(
+            item_id,
+            item_name,
+            parent_sku,
+            "estrutura diferente de Cor x Tamanho",
+        ));
+    }
+
+    let color_tier_name = tiers[0]
+        .get("name")
+        .and_then(Value::as_str)
+        .unwrap_or_default();
+    let size_tier_name = tiers[1]
+        .get("name")
+        .and_then(Value::as_str)
+        .unwrap_or_default();
+    if !tier_name_matches(color_tier_name, "cor") || !tier_name_matches(size_tier_name, "tamanho") {
+        return Ok(blocked_listing_update_plan(
+            item_id,
+            item_name,
+            parent_sku,
+            "variacoes nao sao Cor x Tamanho",
+        ));
+    }
+
+    let existing_colors = tier_options(&tiers[0]);
+    let sizes = tier_options(&tiers[1]);
+    if existing_colors.is_empty() || sizes.is_empty() {
+        return Ok(blocked_listing_update_plan(
+            item_id,
+            item_name,
+            parent_sku,
+            "tier de cor ou tamanho vazio",
+        ));
+    }
+
+    let missing_colors = local_colors
+        .iter()
+        .filter(|color| {
+            !existing_colors
+                .iter()
+                .any(|existing| normalized_label(existing) == normalized_label(color))
+        })
+        .cloned()
+        .collect::<Vec<_>>();
+    if missing_colors.is_empty() {
+        return Ok(ShopeeListingUpdatePlan {
+            item_id,
+            item_name: item_name.to_string(),
+            parent_sku: parent_sku.to_string(),
+            existing_color_count: existing_colors.len(),
+            size_count: sizes.len(),
+            missing_colors,
+            model_count: 0,
+            blocked_reason: None,
+            tier_variation: tiers.clone(),
+            models_to_add: Vec::new(),
+        });
+    }
+
+    let final_model_count = (existing_colors.len() + missing_colors.len()) * sizes.len();
+    if final_model_count > 100 {
+        return Ok(blocked_listing_update_plan(
+            item_id,
+            item_name,
+            parent_sku,
+            "total de combinacoes passaria de 100",
+        ));
+    }
+
+    let size_prices = match remote_size_prices(model_response, sizes.len()) {
+        Ok(prices) => prices,
+        Err(_) => {
+            return Ok(blocked_listing_update_plan(
+                item_id,
+                item_name,
+                parent_sku,
+                "nao foi possivel mapear preco por tamanho",
+            ));
+        }
+    };
+
+    let color_image_id = first_tier_image_id(&tiers[0]);
+    let mut tier_variation = tiers.clone();
+    let color_options = tier_variation[0]
+        .get_mut("option_list")
+        .and_then(Value::as_array_mut)
+        .ok_or_else(|| ShopeeError::Api(String::from("option_list de cor invalido")))?;
+    for color in &missing_colors {
+        let mut option = json!({"option": color});
+        if let Some(image_id) = &color_image_id {
+            option["image"] = json!({"image_id": image_id});
+        }
+        color_options.push(option);
+    }
+
+    let mut models_to_add = Vec::new();
+    for (missing_index, color) in missing_colors.iter().enumerate() {
+        let Some((_, vinculo)) = vinculos
+            .iter()
+            .enumerate()
+            .find(|(index, _)| local_colors.get(*index) == Some(color))
+        else {
+            continue;
+        };
+        let color_index = existing_colors.len() + missing_index;
+        let model_sku = vinculo
+            .sku
+            .as_deref()
+            .filter(|sku| !sku.trim().is_empty())
+            .unwrap_or(&tecido.sku)
+            .to_string();
+        for (size_index, size) in sizes.iter().enumerate() {
+            let meters = parse_listing_size_meters(size).ok_or_else(|| {
+                ShopeeError::Api(format!("tamanho Shopee invalido para peso: {size}"))
+            })?;
+            models_to_add.push(json!({
+                "tier_index": [color_index, size_index],
+                "original_price": size_prices[size_index],
+                "model_sku": model_sku,
+                "seller_stock": [{"stock": 1}],
+                "gtin_code": "00",
+                "weight": model_weight_kg(tecido, meters)?,
+                "dimension": {"package_height": 10, "package_width": 30, "package_length": 30}
+            }));
+        }
+    }
+
+    Ok(ShopeeListingUpdatePlan {
+        item_id,
+        item_name: item_name.to_string(),
+        parent_sku: parent_sku.to_string(),
+        existing_color_count: existing_colors.len(),
+        size_count: sizes.len(),
+        missing_colors,
+        model_count: models_to_add.len(),
+        blocked_reason: None,
+        tier_variation,
+        models_to_add,
+    })
+}
+
+fn blocked_listing_update_plan(
+    item_id: i64,
+    item_name: &str,
+    parent_sku: &str,
+    reason: &str,
+) -> ShopeeListingUpdatePlan {
+    ShopeeListingUpdatePlan {
+        item_id,
+        item_name: item_name.to_string(),
+        parent_sku: parent_sku.to_string(),
+        existing_color_count: 0,
+        size_count: 0,
+        missing_colors: Vec::new(),
+        model_count: 0,
+        blocked_reason: Some(reason.to_string()),
+        tier_variation: Vec::new(),
+        models_to_add: Vec::new(),
+    }
+}
+
+fn tier_name_matches(value: &str, expected: &str) -> bool {
+    value.trim().eq_ignore_ascii_case(expected)
+}
+
+fn tier_options(tier: &Value) -> Vec<String> {
+    tier.get("option_list")
+        .and_then(Value::as_array)
+        .into_iter()
+        .flatten()
+        .filter_map(|option| option.get("option").and_then(Value::as_str))
+        .map(ToString::to_string)
+        .collect()
+}
+
+fn first_tier_image_id(tier: &Value) -> Option<String> {
+    tier.get("option_list")
+        .and_then(Value::as_array)?
+        .iter()
+        .filter_map(|option| option.pointer("/image/image_id").and_then(Value::as_str))
+        .find(|image_id| !image_id.trim().is_empty())
+        .map(ToString::to_string)
+}
+
+fn remote_size_prices(model_response: &Value, size_count: usize) -> Result<Vec<f64>, ShopeeError> {
+    let mut prices = vec![None; size_count];
+    let models = model_response
+        .get("model")
+        .and_then(Value::as_array)
+        .ok_or_else(|| ShopeeError::Api(String::from("model list ausente")))?;
+    for model in models {
+        let Some(size_index) = model
+            .get("tier_index")
+            .and_then(Value::as_array)
+            .and_then(|indexes| indexes.get(1))
+            .and_then(Value::as_u64)
+            .and_then(|index| usize::try_from(index).ok())
+        else {
+            continue;
+        };
+        if size_index >= size_count || prices[size_index].is_some() {
+            continue;
+        }
+        prices[size_index] = remote_model_price(model);
+    }
+
+    prices
+        .into_iter()
+        .collect::<Option<Vec<_>>>()
+        .ok_or_else(|| ShopeeError::Api(String::from("preco ausente para algum tamanho")))
+}
+
+fn remote_model_price(model: &Value) -> Option<f64> {
+    model
+        .get("price_info")
+        .and_then(Value::as_array)
+        .and_then(|prices| prices.first())
+        .and_then(|price| {
+            price
+                .get("original_price")
+                .or_else(|| price.get("current_price"))
+                .and_then(Value::as_f64)
+        })
+        .or_else(|| model.get("original_price").and_then(Value::as_f64))
+}
+
+fn normalized_label(value: &str) -> String {
+    value.trim().to_ascii_uppercase()
+}
+
+fn parse_listing_size_meters(value: &str) -> Option<f64> {
+    let trimmed = value.trim().trim_end_matches('m').trim_end_matches('M');
+    trimmed.replace(',', ".").parse::<f64>().ok()
 }
 
 fn model_price(meter_price: f64, meters: f64) -> f64 {
@@ -2167,9 +2576,145 @@ mod tests {
     }
 
     #[test]
+    fn listing_update_adds_missing_color_with_remote_size_prices() {
+        let tecido = test_tecido(300);
+        let vinculos = vec![
+            test_vinculo(&tecido, 1, "Azul", "ANAR-AZUL"),
+            test_vinculo(&tecido, 2, "Bordo", "ANAR-BORDO"),
+        ];
+        let local_colors = listing_colors(&vinculos).unwrap();
+        let response = json!({
+            "tier_variation": [
+                {"name": "Cor", "option_list": [
+                    {"option": "Azul", "image": {"image_id": "img1"}}
+                ]},
+                {"name": "Tamanho", "option_list": [
+                    {"option": "0,5m"},
+                    {"option": "1m"}
+                ]}
+            ],
+            "model": [
+                {"model_id": 10, "tier_index": [0, 0], "model_sku": "ANAR-AZUL", "price_info": [{"original_price": 12.5}]},
+                {"model_id": 11, "tier_index": [0, 1], "model_sku": "ANAR-AZUL", "price_info": [{"original_price": 25.0}]}
+            ]
+        });
+
+        let plan = build_listing_update_plan(
+            &tecido,
+            &vinculos,
+            &local_colors,
+            100,
+            "Anarruga",
+            "ANAR",
+            &response,
+        )
+        .unwrap();
+
+        assert!(plan.blocked_reason.is_none());
+        assert_eq!(plan.missing_colors, vec![String::from("Bordo")]);
+        assert_eq!(plan.model_count, 2);
+        assert_eq!(plan.models_to_add[0]["tier_index"], json!([1, 0]));
+        assert_eq!(plan.models_to_add[0]["original_price"], json!(12.5));
+        assert_eq!(plan.models_to_add[1]["original_price"], json!(25.0));
+        assert_eq!(plan.models_to_add[0]["model_sku"], json!("ANAR-BORDO"));
+        assert_eq!(
+            plan.tier_variation[0]["option_list"][1]["image"]["image_id"],
+            json!("img1")
+        );
+    }
+
+    #[test]
+    fn listing_update_blocks_non_color_size_structure() {
+        let tecido = test_tecido(300);
+        let vinculos = vec![test_vinculo(&tecido, 1, "Azul", "ANAR-AZUL")];
+        let response = json!({
+            "tier_variation": [
+                {"name": "Material", "option_list": [{"option": "Algodao"}]},
+                {"name": "Tamanho", "option_list": [{"option": "1m"}]}
+            ],
+            "model": []
+        });
+
+        let plan = build_listing_update_plan(
+            &tecido,
+            &vinculos,
+            &listing_colors(&vinculos).unwrap(),
+            100,
+            "Anarruga",
+            "ANAR",
+            &response,
+        )
+        .unwrap();
+
+        assert_eq!(
+            plan.blocked_reason.as_deref(),
+            Some("variacoes nao sao Cor x Tamanho")
+        );
+    }
+
+    #[test]
+    fn listing_update_blocks_when_final_combinations_exceed_one_hundred() {
+        let tecido = test_tecido(300);
+        let vinculos = (0..11)
+            .map(|index| test_vinculo(&tecido, index, &format!("Cor {index}"), "ANAR-COR"))
+            .collect::<Vec<_>>();
+        let local_colors = listing_colors(&vinculos).unwrap();
+        let existing_sizes = (0..10)
+            .map(|index| json!({"option": format!("{}m", index + 1)}))
+            .collect::<Vec<_>>();
+        let existing_models = (0..100)
+            .map(|index| {
+                json!({
+                    "model_id": index,
+                    "tier_index": [index / 10, index % 10],
+                    "price_info": [{"original_price": 10.0}]
+                })
+            })
+            .collect::<Vec<_>>();
+        let response = json!({
+            "tier_variation": [
+                {"name": "Cor", "option_list": (0..10).map(|index| json!({"option": format!("Cor {index}")})).collect::<Vec<_>>()},
+                {"name": "Tamanho", "option_list": existing_sizes}
+            ],
+            "model": existing_models
+        });
+
+        let plan = build_listing_update_plan(
+            &tecido,
+            &vinculos,
+            &local_colors,
+            100,
+            "Anarruga",
+            "ANAR",
+            &response,
+        )
+        .unwrap();
+
+        assert_eq!(
+            plan.blocked_reason.as_deref(),
+            Some("total de combinacoes passaria de 100")
+        );
+    }
+
+    #[test]
     fn model_price_is_proportional_to_meterage() {
         assert_eq!(model_price(19.9, 0.5), 9.95);
         assert_eq!(model_price(19.9, 3.0), 59.7);
+    }
+
+    fn test_vinculo(
+        tecido: &TecidoRecord,
+        cor_id: impl Into<i64>,
+        cor_nome: &str,
+        sku: &str,
+    ) -> VinculoRecord {
+        VinculoRecord {
+            cor_id: cor_id.into(),
+            tecido_nome: tecido.nome.clone(),
+            cor_nome: cor_nome.to_string(),
+            cor_hex: None,
+            sku: Some(sku.to_string()),
+        }
     }
 
     fn test_tecido(gramatura_linear_g_m: i32) -> TecidoRecord {
