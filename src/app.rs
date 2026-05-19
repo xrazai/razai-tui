@@ -339,6 +339,14 @@ impl App {
         }
 
         match key.code {
+            KeyCode::Enter
+                if key.modifiers.contains(KeyModifiers::CONTROL)
+                    && self.section == Section::Dados
+                    && self.dados_screen == DadosScreen::VinculosSelecionarCores =>
+            {
+                self.salvar_vinculos();
+                self.dados_screen = DadosScreen::VinculosMenu;
+            }
             KeyCode::Esc if self.section == Section::Dados => self.voltar_dados(),
             KeyCode::Esc => self.running = false,
             KeyCode::Char('1') => self.section = Section::Dashboard,

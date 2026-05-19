@@ -116,7 +116,7 @@ pub fn render_chat(
 
 pub fn render_footer(frame: &mut Frame, area: Rect, db_status: &str, focus: Focus) {
     let footer = Paragraph::new(format!(
-        "Foco: {} | Tab alternar foco | Esq/Dir abas | Cima/Baixo selecionar | Space marcar/desmarcar | Enter abrir/confirmar | Backspace apagar | Esc voltar/cancelar | Ctrl+C sair | {db_status}",
+        "Foco: {} | Tab alternar foco | Esq/Dir abas | Cima/Baixo selecionar | Space marcar/desmarcar | Enter abrir/confirmar | Ctrl+Enter salvar vinculos | Backspace apagar | Esc voltar/cancelar | Ctrl+C sair | {db_status}",
         focus.title(),
     ))
     .style(Style::default().fg(Color::DarkGray))
