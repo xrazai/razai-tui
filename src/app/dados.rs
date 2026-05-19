@@ -1,10 +1,14 @@
-use crossterm::event::KeyCode;
+use std::{fs, path::Path};
 
 use super::App;
 use crate::{
     db::{self, TecidoRecord},
     models::*,
 };
+use crossterm::event::KeyCode;
+use image::ImageReader;
+use ratatui::layout::Size;
+use ratatui_image::{Resize, picker::Picker};
 
 mod navigation;
 
@@ -140,6 +144,11 @@ impl App {
             }
             DadosScreen::VinculosSelecionarCores | DadosScreen::VinculosLista => {
                 self.dados_screen = DadosScreen::VinculosMenu;
+            }
+            DadosScreen::VinculoDetalhe => {
+                self.vinculo_image_upload_active = false;
+                self.vinculo_image_path_input.clear();
+                self.dados_screen = DadosScreen::VinculosLista;
             }
             DadosScreen::VinculosSelecionarTecidoCriar
             | DadosScreen::VinculosSelecionarTecidoVer => {
@@ -497,6 +506,30 @@ impl App {
         self.dados_screen = DadosScreen::VinculosLista;
     }
 
+    pub(super) fn open_vinculo_detalhe(&mut self) {
+        if self.vinculos.is_empty() {
+            return;
+        }
+        self.vinculo_image_slot = VinculoImageSlot::Original;
+        self.vinculo_image_path_input.clear();
+        self.vinculo_image_upload_active = false;
+        self.load_vinculo_images();
+        self.dados_screen = DadosScreen::VinculoDetalhe;
+    }
+
+    pub(super) fn handle_vinculo_detalhe_enter(&mut self) {
+        if self.vinculo_image_upload_active {
+            self.salvar_vinculo_image_upload();
+            return;
+        }
+        self.vinculo_image_path_input.clear();
+        self.vinculo_image_upload_active = true;
+        self.db_status = format!(
+            "Cole o caminho do arquivo para {} e pressione Enter.",
+            self.vinculo_image_slot.title()
+        );
+    }
+
     pub(super) fn toggle_vinculo_cor(&mut self) {
         let item_id = if self.selected_vinculo_usa_estampas() {
             self.estampas
@@ -593,5 +626,110 @@ impl App {
                 Err(error) => self.db_status = format!("Erro ao carregar vinculos: {error}"),
             }
         }
+    }
+
+    fn load_vinculo_images(&mut self) {
+        let Some((tecido_id, item_id, usa_estampas)) = self.selected_vinculo_keys() else {
+            return;
+        };
+        if let Some(pool) = &self.db_pool {
+            match self.db_runtime.block_on(db::get_vinculo_images(
+                pool,
+                tecido_id,
+                item_id,
+                usa_estampas,
+            )) {
+                Ok(images) => {
+                    self.vinculo_images = images;
+                    self.refresh_vinculo_thumbnail();
+                }
+                Err(error) => {
+                    self.db_status = format!("Erro ao carregar imagens do vinculo: {error}");
+                }
+            }
+        }
+    }
+
+    fn salvar_vinculo_image_upload(&mut self) {
+        let path_text = self
+            .vinculo_image_path_input
+            .trim()
+            .trim_matches('"')
+            .trim_matches('\'')
+            .to_string();
+        if path_text.is_empty() {
+            self.db_status = String::from("Informe o caminho da imagem.");
+            return;
+        }
+        let bytes = match fs::read(Path::new(&path_text)) {
+            Ok(bytes) => bytes,
+            Err(error) => {
+                self.db_status = format!("Erro ao ler imagem: {error}");
+                return;
+            }
+        };
+        let reader = match ImageReader::new(std::io::Cursor::new(&bytes)).with_guessed_format() {
+            Ok(reader) => reader,
+            Err(error) => {
+                self.db_status =
+                    format!("Arquivo selecionado nao parece uma imagem suportada: {error}");
+                return;
+            }
+        };
+        if let Err(error) = reader.decode() {
+            self.db_status =
+                format!("Arquivo selecionado nao parece uma imagem suportada: {error}");
+            return;
+        }
+        let Some((tecido_id, item_id, usa_estampas)) = self.selected_vinculo_keys() else {
+            return;
+        };
+        let Some(pool) = &self.db_pool else {
+            self.db_status = String::from("Banco local indisponivel para salvar imagem.");
+            return;
+        };
+        let slot = self.vinculo_image_slot;
+        match self.db_runtime.block_on(db::update_vinculo_image(
+            pool,
+            tecido_id,
+            item_id,
+            usa_estampas,
+            slot.key(),
+            &bytes,
+        )) {
+            Ok(()) => {
+                self.vinculo_image_upload_active = false;
+                self.vinculo_image_path_input.clear();
+                self.load_vinculos(tecido_id);
+                self.load_vinculo_images();
+                self.db_status = format!("{} salva no vinculo.", slot.title());
+            }
+            Err(error) => self.db_status = format!("Erro ao salvar imagem no vinculo: {error}"),
+        }
+    }
+
+    fn selected_vinculo_keys(&self) -> Option<(i64, i64, bool)> {
+        let tecido = self.selected_vinculo_tecido()?;
+        let vinculo = self.vinculos.get(self.vinculo_lista_option)?;
+        Some((tecido.id, vinculo.cor_id, tecido.tipo == "Estampado"))
+    }
+
+    fn refresh_vinculo_thumbnail(&mut self) {
+        self.vinculo_thumbnail = self
+            .vinculo_images
+            .imagem_original
+            .as_deref()
+            .and_then(|bytes| {
+                ImageReader::new(std::io::Cursor::new(bytes))
+                    .with_guessed_format()
+                    .ok()?
+                    .decode()
+                    .ok()
+            })
+            .and_then(|image| {
+                Picker::halfblocks()
+                    .new_protocol(image, Size::new(24, 10), Resize::Fit(None))
+                    .ok()
+            });
     }
 }

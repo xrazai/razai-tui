@@ -2690,6 +2690,10 @@ mod tests {
             cor_nome: String::from("Azul"),
             cor_hex: None,
             sku: Some(String::from("ANAR-AZUL")),
+            has_imagem_original: false,
+            has_imagem_brand: false,
+            has_imagem_modelo: false,
+            has_imagem_alternativa: false,
         }];
         let sizes = listing_sizes(1);
         let models = listing_models(&tecido, &vinculos, &sizes, 20.0).unwrap();
@@ -2993,6 +2997,10 @@ mod tests {
             cor_nome: cor_nome.to_string(),
             cor_hex: None,
             sku: Some(sku.to_string()),
+            has_imagem_original: false,
+            has_imagem_brand: false,
+            has_imagem_modelo: false,
+            has_imagem_alternativa: false,
         }
     }
 

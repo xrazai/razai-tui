@@ -18,7 +18,7 @@ use crate::{
     agent,
     db::{
         self, CorRecord, EstampaRecord, PedidoRecord, TecidoRecord, VendaHistoricoRecord,
-        VinculoRecord,
+        VinculoImages, VinculoRecord,
     },
     models::*,
     screens, shopee,
@@ -32,6 +32,7 @@ mod documentos;
 mod pedidos;
 mod vendas;
 
+use ratatui_image::protocol::Protocol as ImageProtocol;
 use std::io;
 
 #[derive(Clone, Copy)]
@@ -50,6 +51,11 @@ pub struct App {
     pub vinculo_tecido_option: usize,
     pub vinculo_criar_option: usize,
     pub vinculo_lista_option: usize,
+    pub vinculo_image_slot: VinculoImageSlot,
+    pub vinculo_image_path_input: String,
+    pub vinculo_image_upload_active: bool,
+    pub vinculo_images: VinculoImages,
+    pub vinculo_thumbnail: Option<ImageProtocol>,
     pub tecidos: Vec<TecidoRecord>,
     pub cores: Vec<CorRecord>,
     pub estampas: Vec<EstampaRecord>,
@@ -170,6 +176,11 @@ impl App {
             vinculo_tecido_option: 0,
             vinculo_criar_option: 0,
             vinculo_lista_option: 0,
+            vinculo_image_slot: VinculoImageSlot::default(),
+            vinculo_image_path_input: String::new(),
+            vinculo_image_upload_active: false,
+            vinculo_images: VinculoImages::default(),
+            vinculo_thumbnail: None,
             tecidos,
             cores,
             estampas,
@@ -359,6 +370,27 @@ impl App {
             return;
         }
 
+        if self.section == Section::Dados
+            && self.dados_screen == DadosScreen::VinculoDetalhe
+            && self.vinculo_image_upload_active
+        {
+            match key.code {
+                KeyCode::Esc => {
+                    self.vinculo_image_upload_active = false;
+                    self.vinculo_image_path_input.clear();
+                }
+                KeyCode::Enter => self.handle_vinculo_detalhe_enter(),
+                KeyCode::Backspace => {
+                    self.vinculo_image_path_input.pop();
+                }
+                KeyCode::Char(character) if !character.is_control() => {
+                    self.vinculo_image_path_input.push(character);
+                }
+                _ => {}
+            }
+            return;
+        }
+
         match key.code {
             KeyCode::Enter
                 if key.modifiers.contains(KeyModifiers::CONTROL)
@@ -389,6 +421,9 @@ impl App {
                 | DadosScreen::VinculosSelecionarTecidoVer => self.previous_vinculo_tecido(),
                 DadosScreen::VinculosSelecionarCores => self.previous_vinculo_criar_option(),
                 DadosScreen::VinculosLista => self.previous_vinculo_lista(),
+                DadosScreen::VinculoDetalhe => {
+                    self.vinculo_image_slot = self.vinculo_image_slot.previous()
+                }
                 DadosScreen::CadastrarTecido
                 | DadosScreen::CadastrarCor
                 | DadosScreen::CadastrarEstampa => {}
@@ -403,6 +438,9 @@ impl App {
                 | DadosScreen::VinculosSelecionarTecidoVer => self.next_vinculo_tecido(),
                 DadosScreen::VinculosSelecionarCores => self.next_vinculo_criar_option(),
                 DadosScreen::VinculosLista => self.next_vinculo_lista(),
+                DadosScreen::VinculoDetalhe => {
+                    self.vinculo_image_slot = self.vinculo_image_slot.next()
+                }
                 DadosScreen::CadastrarTecido
                 | DadosScreen::CadastrarCor
                 | DadosScreen::CadastrarEstampa => {}
@@ -458,6 +496,10 @@ impl App {
                     self.open_vinculo_lista();
                 } else if self.dados_screen == DadosScreen::VinculosSelecionarCores {
                     self.handle_vinculo_criar_enter();
+                } else if self.dados_screen == DadosScreen::VinculosLista {
+                    self.open_vinculo_detalhe();
+                } else if self.dados_screen == DadosScreen::VinculoDetalhe {
+                    self.handle_vinculo_detalhe_enter();
                 }
             }
             KeyCode::Char(' ') if self.dados_screen == DadosScreen::VinculosSelecionarCores => {

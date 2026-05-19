@@ -39,6 +39,19 @@ Tabelas principais:
 
 O app tambem garante em runtime as tabelas `configuracoes`, `estampas` e `tecido_estampas`, porque bancos locais antigos podem ter sido criados antes dessas migrations.
 
+## Imagens de Vinculos
+
+As tabelas `tecido_cores` e `tecido_estampas` possuem quatro colunas `BYTEA` para imagens do vinculo:
+
+| Coluna | Uso |
+| --- | --- |
+| `imagem_original` | Foto principal/original do vinculo, usada para thumbnail no TUI. |
+| `imagem_brand` | Imagem de marca/branding. |
+| `imagem_modelo` | Imagem com modelo. |
+| `imagem_alternativa` | Imagem alternativa/complementar. |
+
+Ao salvar novamente a lista de vinculos de um tecido, os registros mantidos preservam essas imagens; apenas os vinculos desmarcados sao removidos.
+
 ## Configuracoes
 
 Configuracoes usam pares `chave`/`valor`.

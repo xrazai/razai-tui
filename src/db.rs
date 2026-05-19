@@ -167,6 +167,25 @@ pub async fn ensure_pedidos_tables(pool: &PgPool) -> Result<(), sqlx::Error> {
     Ok(())
 }
 
+pub async fn ensure_vinculo_image_columns(pool: &PgPool) -> Result<(), sqlx::Error> {
+    for table in ["tecido_cores", "tecido_estampas"] {
+        for column in [
+            "imagem_original",
+            "imagem_brand",
+            "imagem_modelo",
+            "imagem_alternativa",
+        ] {
+            sqlx::query(&format!(
+                "ALTER TABLE {table} ADD COLUMN IF NOT EXISTS {column} BYTEA"
+            ))
+            .execute(pool)
+            .await?;
+        }
+    }
+
+    Ok(())
+}
+
 pub async fn get_config(pool: &PgPool, chave: &str) -> Result<Option<String>, sqlx::Error> {
     let row = sqlx::query("SELECT valor FROM configuracoes WHERE chave = $1")
         .bind(chave)
@@ -231,6 +250,18 @@ pub struct VinculoRecord {
     pub cor_nome: String,
     pub cor_hex: Option<String>,
     pub sku: Option<String>,
+    pub has_imagem_original: bool,
+    pub has_imagem_brand: bool,
+    pub has_imagem_modelo: bool,
+    pub has_imagem_alternativa: bool,
+}
+
+#[derive(Clone, Default)]
+pub struct VinculoImages {
+    pub imagem_original: Option<Vec<u8>>,
+    pub imagem_brand: Option<Vec<u8>>,
+    pub imagem_modelo: Option<Vec<u8>>,
+    pub imagem_alternativa: Option<Vec<u8>>,
 }
 
 pub async fn list_tecidos(pool: &PgPool) -> Result<Vec<TecidoRecord>, sqlx::Error> {
@@ -494,7 +525,11 @@ pub async fn list_vinculos_by_tecido(
             t.nome AS tecido_nome,
             c.nome AS cor_nome,
             c.codigo_hex AS cor_hex,
-            tc.sku
+            tc.sku,
+            tc.imagem_original IS NOT NULL AS has_imagem_original,
+            tc.imagem_brand IS NOT NULL AS has_imagem_brand,
+            tc.imagem_modelo IS NOT NULL AS has_imagem_modelo,
+            tc.imagem_alternativa IS NOT NULL AS has_imagem_alternativa
         FROM tecido_cores tc
         JOIN tecidos t ON t.id = tc.tecido_id
         JOIN cores c ON c.id = tc.cor_id
@@ -514,6 +549,10 @@ pub async fn list_vinculos_by_tecido(
             cor_nome: row.get("cor_nome"),
             cor_hex: row.get("cor_hex"),
             sku: row.get("sku"),
+            has_imagem_original: row.get("has_imagem_original"),
+            has_imagem_brand: row.get("has_imagem_brand"),
+            has_imagem_modelo: row.get("has_imagem_modelo"),
+            has_imagem_alternativa: row.get("has_imagem_alternativa"),
         })
         .collect())
 }
@@ -529,7 +568,11 @@ pub async fn list_estampa_vinculos_by_tecido(
             t.nome AS tecido_nome,
             e.nome AS cor_nome,
             NULL::text AS cor_hex,
-            te.sku
+            te.sku,
+            te.imagem_original IS NOT NULL AS has_imagem_original,
+            te.imagem_brand IS NOT NULL AS has_imagem_brand,
+            te.imagem_modelo IS NOT NULL AS has_imagem_modelo,
+            te.imagem_alternativa IS NOT NULL AS has_imagem_alternativa
         FROM tecido_estampas te
         JOIN tecidos t ON t.id = te.tecido_id
         JOIN estampas e ON e.id = te.estampa_id
@@ -549,8 +592,79 @@ pub async fn list_estampa_vinculos_by_tecido(
             cor_nome: row.get("cor_nome"),
             cor_hex: row.get("cor_hex"),
             sku: row.get("sku"),
+            has_imagem_original: row.get("has_imagem_original"),
+            has_imagem_brand: row.get("has_imagem_brand"),
+            has_imagem_modelo: row.get("has_imagem_modelo"),
+            has_imagem_alternativa: row.get("has_imagem_alternativa"),
         })
         .collect())
+}
+
+pub async fn get_vinculo_images(
+    pool: &PgPool,
+    tecido_id: i64,
+    item_id: i64,
+    usa_estampas: bool,
+) -> Result<VinculoImages, sqlx::Error> {
+    let table = if usa_estampas {
+        "tecido_estampas"
+    } else {
+        "tecido_cores"
+    };
+    let item_column = if usa_estampas { "estampa_id" } else { "cor_id" };
+    let row = sqlx::query(&format!(
+        r#"
+        SELECT imagem_original, imagem_brand, imagem_modelo, imagem_alternativa
+        FROM {table}
+        WHERE tecido_id = $1 AND {item_column} = $2
+        "#
+    ))
+    .bind(tecido_id)
+    .bind(item_id)
+    .fetch_optional(pool)
+    .await?;
+
+    Ok(row
+        .map(|row| VinculoImages {
+            imagem_original: row.get("imagem_original"),
+            imagem_brand: row.get("imagem_brand"),
+            imagem_modelo: row.get("imagem_modelo"),
+            imagem_alternativa: row.get("imagem_alternativa"),
+        })
+        .unwrap_or_default())
+}
+
+pub async fn update_vinculo_image(
+    pool: &PgPool,
+    tecido_id: i64,
+    item_id: i64,
+    usa_estampas: bool,
+    slot: &str,
+    bytes: &[u8],
+) -> Result<(), sqlx::Error> {
+    let table = if usa_estampas {
+        "tecido_estampas"
+    } else {
+        "tecido_cores"
+    };
+    let item_column = if usa_estampas { "estampa_id" } else { "cor_id" };
+    let column = match slot {
+        "original" => "imagem_original",
+        "brand" => "imagem_brand",
+        "modelo" => "imagem_modelo",
+        "alternativa" => "imagem_alternativa",
+        _ => "imagem_original",
+    };
+    sqlx::query(&format!(
+        "UPDATE {table} SET {column} = $1 WHERE tecido_id = $2 AND {item_column} = $3"
+    ))
+    .bind(bytes)
+    .bind(tecido_id)
+    .bind(item_id)
+    .execute(pool)
+    .await?;
+
+    Ok(())
 }
 
 pub async fn replace_vinculos(
@@ -560,18 +674,30 @@ pub async fn replace_vinculos(
 ) -> Result<(), sqlx::Error> {
     let mut transaction = pool.begin().await?;
 
-    sqlx::query("DELETE FROM tecido_cores WHERE tecido_id = $1")
+    let selected_ids = vinculos
+        .iter()
+        .map(|(cor_id, _)| *cor_id)
+        .collect::<Vec<_>>();
+    sqlx::query("DELETE FROM tecido_cores WHERE tecido_id = $1 AND NOT (cor_id = ANY($2))")
         .bind(tecido_id)
+        .bind(&selected_ids)
         .execute(&mut *transaction)
         .await?;
 
     for (cor_id, sku) in vinculos {
-        sqlx::query("INSERT INTO tecido_cores (tecido_id, cor_id, sku) VALUES ($1, $2, $3)")
-            .bind(tecido_id)
-            .bind(cor_id)
-            .bind(sku)
-            .execute(&mut *transaction)
-            .await?;
+        sqlx::query(
+            r#"
+            INSERT INTO tecido_cores (tecido_id, cor_id, sku)
+            VALUES ($1, $2, $3)
+            ON CONFLICT (tecido_id, cor_id)
+            DO UPDATE SET sku = EXCLUDED.sku
+            "#,
+        )
+        .bind(tecido_id)
+        .bind(cor_id)
+        .bind(sku)
+        .execute(&mut *transaction)
+        .await?;
     }
 
     transaction.commit().await?;
@@ -586,18 +712,30 @@ pub async fn replace_estampa_vinculos(
 ) -> Result<(), sqlx::Error> {
     let mut transaction = pool.begin().await?;
 
-    sqlx::query("DELETE FROM tecido_estampas WHERE tecido_id = $1")
+    let selected_ids = vinculos
+        .iter()
+        .map(|(estampa_id, _)| *estampa_id)
+        .collect::<Vec<_>>();
+    sqlx::query("DELETE FROM tecido_estampas WHERE tecido_id = $1 AND NOT (estampa_id = ANY($2))")
         .bind(tecido_id)
+        .bind(&selected_ids)
         .execute(&mut *transaction)
         .await?;
 
     for (estampa_id, sku) in vinculos {
-        sqlx::query("INSERT INTO tecido_estampas (tecido_id, estampa_id, sku) VALUES ($1, $2, $3)")
-            .bind(tecido_id)
-            .bind(estampa_id)
-            .bind(sku)
-            .execute(&mut *transaction)
-            .await?;
+        sqlx::query(
+            r#"
+            INSERT INTO tecido_estampas (tecido_id, estampa_id, sku)
+            VALUES ($1, $2, $3)
+            ON CONFLICT (tecido_id, estampa_id)
+            DO UPDATE SET sku = EXCLUDED.sku
+            "#,
+        )
+        .bind(tecido_id)
+        .bind(estampa_id)
+        .bind(sku)
+        .execute(&mut *transaction)
+        .await?;
     }
 
     transaction.commit().await?;

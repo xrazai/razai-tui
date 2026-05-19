@@ -464,6 +464,10 @@ mod tests {
                 cor_nome: format!("Cor {index}"),
                 cor_hex: Some(String::from("#AA2233")),
                 sku: Some(format!("ANAR-{index}")),
+                has_imagem_original: false,
+                has_imagem_brand: false,
+                has_imagem_modelo: false,
+                has_imagem_alternativa: false,
             })
             .collect::<Vec<_>>();
         let path = std::env::temp_dir().join("razai_checklist_test.pdf");
@@ -495,6 +499,10 @@ mod tests {
                 cor_nome: format!("Cor {index}"),
                 cor_hex: Some(String::from("#22AA99")),
                 sku: Some(format!("HELA-{index}")),
+                has_imagem_original: false,
+                has_imagem_brand: false,
+                has_imagem_modelo: false,
+                has_imagem_alternativa: false,
             })
             .collect::<Vec<_>>();
         let path = std::env::temp_dir().join("razai_checklist_large_test.pdf");

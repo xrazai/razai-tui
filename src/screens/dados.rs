@@ -2,11 +2,12 @@ mod forms;
 
 use ratatui::{
     Frame,
-    layout::Rect,
+    layout::{Constraint, Direction, Layout, Margin, Rect},
     style::{Color, Modifier, Style},
     text::{Line, Span},
-    widgets::{Block, Borders, List, ListItem, ListState},
+    widgets::{Block, Borders, List, ListItem, ListState, Paragraph},
 };
+use ratatui_image::Image as TuiImage;
 
 use crate::{
     app::App,
@@ -87,6 +88,7 @@ pub fn render(frame: &mut Frame, area: Rect, app: &App) {
         DadosScreen::VinculosLista => {
             render_vinculos_lista(frame, area, app.vinculo_lista_option, &app.vinculos)
         }
+        DadosScreen::VinculoDetalhe => render_vinculo_detalhe(frame, area, app),
     }
 }
 
@@ -312,11 +314,21 @@ fn render_vinculos_lista(
     let items = vinculos.iter().enumerate().map(|(index, vinculo)| {
         let sku = vinculo.sku.as_deref().unwrap_or("sem-sku");
         let hex = vinculo.cor_hex.as_deref().unwrap_or("#");
+        let image_marker = if vinculo.has_imagem_original
+            || vinculo.has_imagem_brand
+            || vinculo.has_imagem_modelo
+            || vinculo.has_imagem_alternativa
+        {
+            " img"
+        } else {
+            ""
+        };
         ListItem::new(Line::from(vec![
             Span::raw(format!(
-                "{}. {} - {} / ",
+                "{}. {}{} - {} / ",
                 index + 1,
                 sku,
+                image_marker,
                 vinculo.tecido_nome
             )),
             color_swatch(hex),
@@ -334,4 +346,81 @@ fn render_vinculos_lista(
         .highlight_symbol("> ")
         .highlight_style(Style::default().bg(Color::Cyan).bold());
     frame.render_stateful_widget(list, area, &mut state);
+}
+
+fn render_vinculo_detalhe(frame: &mut Frame, area: Rect, app: &App) {
+    let Some(vinculo) = app.vinculos.get(app.vinculo_lista_option) else {
+        return;
+    };
+    let chunks = Layout::default()
+        .direction(Direction::Horizontal)
+        .constraints([Constraint::Min(54), Constraint::Length(30)])
+        .split(area);
+
+    let slot_items = VinculoImageSlot::ALL.iter().map(|slot| {
+        let has_image = match slot {
+            VinculoImageSlot::Original => app.vinculo_images.imagem_original.is_some(),
+            VinculoImageSlot::Brand => app.vinculo_images.imagem_brand.is_some(),
+            VinculoImageSlot::Modelo => app.vinculo_images.imagem_modelo.is_some(),
+            VinculoImageSlot::Alternativa => app.vinculo_images.imagem_alternativa.is_some(),
+        };
+        let marker = if has_image { "[+]" } else { "[ ]" };
+        ListItem::new(format!("{marker} {}", slot.title()))
+    });
+    let mut state = ListState::default().with_selected(Some(app.vinculo_image_slot.index()));
+    let detail = List::new(slot_items)
+        .block(
+            Block::default()
+                .title(format!(
+                    "Vinculo > {} / {}",
+                    vinculo.tecido_nome, vinculo.cor_nome
+                ))
+                .borders(Borders::ALL),
+        )
+        .highlight_symbol("> ")
+        .highlight_style(Style::default().fg(Color::Black).bg(Color::Cyan).bold());
+    frame.render_stateful_widget(detail, chunks[0], &mut state);
+
+    let preview = chunks[1];
+    frame.render_widget(
+        Block::default()
+            .title("Thumbnail original")
+            .borders(Borders::ALL),
+        preview,
+    );
+    let inner = preview.inner(Margin {
+        horizontal: 1,
+        vertical: 1,
+    });
+    if let Some(protocol) = &app.vinculo_thumbnail {
+        frame.render_widget(TuiImage::new(protocol).allow_clipping(true), inner);
+    } else {
+        let text = if app.vinculo_images.imagem_original.is_some() {
+            "Imagem original salva, mas sem preview neste terminal."
+        } else {
+            "Sem imagem original."
+        };
+        frame.render_widget(Paragraph::new(text), inner);
+    }
+
+    if app.vinculo_image_upload_active {
+        let input_area = crate::ui::centered_rect(70, 8, area);
+        crate::ui::render_dialog_background(frame, input_area);
+        frame.render_widget(
+            Paragraph::new(format!(
+                "{}\n\n{}",
+                app.vinculo_image_slot.title(),
+                app.vinculo_image_path_input
+            ))
+            .block(
+                Block::default()
+                    .title("Caminho da imagem")
+                    .borders(Borders::ALL)
+                    .style(Style::default().bg(crate::ui::DIALOG_BG))
+                    .border_style(Style::default().fg(Color::Cyan)),
+            )
+            .style(Style::default().bg(crate::ui::DIALOG_BG)),
+            input_area,
+        );
+    }
 }

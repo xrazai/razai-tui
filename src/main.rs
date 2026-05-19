@@ -26,6 +26,7 @@ fn main() -> io::Result<()> {
         let _ = db_runtime.block_on(db::ensure_estampas_tables(pool));
         let _ = db_runtime.block_on(db::ensure_vendas_tables(pool));
         let _ = db_runtime.block_on(db::ensure_pedidos_tables(pool));
+        let _ = db_runtime.block_on(db::ensure_vinculo_image_columns(pool));
     }
     let tecidos = match &pool {
         Some(pool) => db_runtime

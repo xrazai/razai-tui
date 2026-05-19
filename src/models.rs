@@ -103,6 +103,55 @@ pub enum DadosScreen {
     VinculosSelecionarTecidoVer,
     VinculosSelecionarCores,
     VinculosLista,
+    VinculoDetalhe,
+}
+
+#[derive(Clone, Copy, Default, Eq, PartialEq)]
+pub enum VinculoImageSlot {
+    #[default]
+    Original,
+    Brand,
+    Modelo,
+    Alternativa,
+}
+
+impl VinculoImageSlot {
+    pub const ALL: [VinculoImageSlot; 4] = [
+        VinculoImageSlot::Original,
+        VinculoImageSlot::Brand,
+        VinculoImageSlot::Modelo,
+        VinculoImageSlot::Alternativa,
+    ];
+
+    pub fn title(self) -> &'static str {
+        match self {
+            VinculoImageSlot::Original => "Imagem Original",
+            VinculoImageSlot::Brand => "Imagem Brand",
+            VinculoImageSlot::Modelo => "Imagem Modelo",
+            VinculoImageSlot::Alternativa => "Imagem Alternativa",
+        }
+    }
+
+    pub fn key(self) -> &'static str {
+        match self {
+            VinculoImageSlot::Original => "original",
+            VinculoImageSlot::Brand => "brand",
+            VinculoImageSlot::Modelo => "modelo",
+            VinculoImageSlot::Alternativa => "alternativa",
+        }
+    }
+
+    pub fn next(self) -> Self {
+        Self::ALL[(self.index() + 1) % Self::ALL.len()]
+    }
+
+    pub fn previous(self) -> Self {
+        Self::ALL[(self.index() + Self::ALL.len() - 1) % Self::ALL.len()]
+    }
+
+    pub fn index(self) -> usize {
+        Self::ALL.iter().position(|slot| *slot == self).unwrap_or(0)
+    }
 }
 
 #[derive(Default)]

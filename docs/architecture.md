@@ -46,6 +46,14 @@ Evitar arquivos com mais de 600 linhas. Se passar disso e houver um corte claro 
 - persistencia para `src/db.rs`
 - contexto de IA para `src/agent.rs`
 
+## Vinculos e Imagens
+
+Vinculos de tecidos lisos ficam em `tecido_cores`; vinculos de tecidos estampados ficam em `tecido_estampas`. Cada vinculo pode armazenar quatro imagens em colunas `BYTEA`: `imagem_original`, `imagem_brand`, `imagem_modelo` e `imagem_alternativa`.
+
+O fluxo de detalhe do vinculo permite colar o caminho de uma imagem local para cada slot. O app valida se o arquivo e uma imagem suportada antes de gravar no banco. A thumbnail no terminal usa `ratatui-image` com fallback halfblock, renderizando a `imagem_original` no painel lateral quando houver preview possivel.
+
+Ao atualizar os vinculos de um tecido, o app preserva os registros existentes e apenas remove os itens desmarcados; isso evita perder imagens ja cadastradas nos vinculos mantidos.
+
 ## Agente IA
 
 O app usa um agente unico, o Razai Master. A tela atual define apenas o contexto/capacidade preferencial; o agente recebe contexto global de dados, vendas, pedidos, vinculos e configuracoes. Consultas locais podem ser respondidas diretamente. Acoes que gravam ou alteram dados ficam em `pending_agent_action` e so executam depois de confirmacao textual do usuario (`sim`/`nao`).

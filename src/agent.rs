@@ -58,6 +58,10 @@ pub fn active_context(
             capability: "dados.vinculos.lista",
             description: "Ajuda a consultar os vinculos existentes de tecido com cor ou estampa.",
         },
+        (Section::Dados, DadosScreen::VinculoDetalhe, _, _) => AgentContext {
+            capability: "dados.vinculos.imagens",
+            description: "Ajuda a anexar imagens ao vinculo selecionado e conferir thumbnail no terminal.",
+        },
         (Section::Dados, DadosScreen::Menu, DadosOption::Tecido, _) => AgentContext {
             capability: "dados.tecidos",
             description: "Ajuda com dados de tecidos.",

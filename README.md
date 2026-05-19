@@ -74,6 +74,15 @@ Regra de vinculos:
 - Tecido `Liso` usa cores cadastradas.
 - Tecido `Estampado` usa estampas cadastradas.
 
+Na lista de vinculos, `Enter` abre o detalhe do vinculo selecionado. Cada vinculo aceita quatro imagens salvas no banco local:
+
+- `Imagem Original`
+- `Imagem Brand`
+- `Imagem Modelo`
+- `Imagem Alternativa`
+
+No detalhe do vinculo, selecione o slot com `Cima/Baixo`, pressione `Enter`, cole o caminho do arquivo e confirme com `Enter`. A `Imagem Original` e renderizada como thumbnail no terminal via `ratatui-image` quando o terminal/backend permitir; caso contrario o sistema mantém a imagem salva e informa que nao conseguiu gerar preview.
+
 ## Vendas
 
 O fluxo de nova venda e:
