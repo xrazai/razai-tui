@@ -715,9 +715,12 @@ impl ShopeeConfig {
     fn authorization_hint(&self) -> String {
         match &self.redirect_url {
             Some(redirect_url) => format!(
-                "autorize a loja pela Shopee usando redirect_url={redirect_url} e troque o code por tokens"
+                "abra {} para autorizar a loja. Redirect cadastrado na Shopee: {redirect_url}",
+                authorization_entry_url(self)
             ),
-            None => String::from("configure SHOPEE_REDIRECT_URL e autorize a loja na Shopee"),
+            None => String::from(
+                "configure SHOPEE_REDIRECT_URL; depois abra /shopee/auth para autorizar a loja",
+            ),
         }
     }
 }
@@ -901,6 +904,23 @@ mod tests {
             authorization_entry_url(&config),
             "https://example.ngrok.app/shopee/auth"
         );
+    }
+
+    #[test]
+    fn authorization_hint_points_to_auth_entrypoint_not_callback() {
+        let config = ShopeeConfig {
+            partner_id: 100,
+            partner_key: String::from("secret"),
+            shop_id: 200,
+            api_host: String::from("https://partner.shopeemobile.com"),
+            redirect_url: Some(String::from(
+                "https://example.ngrok.app/shopee/callback",
+            )),
+        };
+        let hint = config.authorization_hint();
+
+        assert!(hint.contains("https://example.ngrok.app/shopee/auth"));
+        assert!(hint.contains("Redirect cadastrado"));
     }
 
     #[test]

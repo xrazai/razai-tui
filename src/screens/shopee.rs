@@ -2,7 +2,7 @@ use ratatui::{
     Frame,
     layout::{Constraint, Direction, Layout, Rect},
     style::{Color, Style},
-    widgets::{Block, Borders, List, ListItem, ListState, Paragraph},
+    widgets::{Block, Borders, List, ListItem, ListState, Paragraph, Wrap},
 };
 
 pub fn render(frame: &mut Frame, area: Rect, selected: usize, status: &str) {
@@ -23,6 +23,7 @@ pub fn render(frame: &mut Frame, area: Rect, selected: usize, status: &str) {
     frame.render_stateful_widget(list, chunks[0], &mut state);
 
     let status = Paragraph::new(status.to_string())
-        .block(Block::default().title("Status Shopee").borders(Borders::ALL));
+        .block(Block::default().title("Status Shopee").borders(Borders::ALL))
+        .wrap(Wrap { trim: false });
     frame.render_widget(status, chunks[1]);
 }
