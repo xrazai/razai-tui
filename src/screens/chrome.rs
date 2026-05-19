@@ -3,7 +3,7 @@ use ratatui::{
     layout::{Alignment, Rect},
     style::{Color, Style},
     text::{Line, Span},
-    widgets::{Block, Borders, Paragraph, Tabs},
+    widgets::{Block, Borders, Paragraph, Tabs, Wrap},
 };
 
 use crate::{
@@ -75,7 +75,8 @@ pub fn render_chat(
                 .title("Agente")
                 .borders(Borders::ALL)
                 .border_style(selected_border_style),
-        );
+        )
+        .wrap(Wrap { trim: false });
     frame.render_widget(agent_panel, chunks[0]);
 
     let history = if chat.messages.is_empty() {
@@ -95,7 +96,8 @@ pub fn render_chat(
             .title("Chat")
             .borders(Borders::ALL)
             .border_style(selected_border_style),
-    );
+    )
+    .wrap(Wrap { trim: false });
     frame.render_widget(messages, chunks[1]);
 
     let input_text = if chat.waiting && chat.input.is_empty() {
@@ -112,7 +114,8 @@ pub fn render_chat(
             .title("Mensagem")
             .borders(Borders::ALL)
             .border_style(selected_border_style),
-    );
+    )
+    .wrap(Wrap { trim: false });
     frame.render_widget(input, chunks[2]);
 }
 
@@ -122,7 +125,8 @@ pub fn render_footer(frame: &mut Frame, area: Rect, db_status: &str, focus: Focu
         focus.title(),
     ))
     .style(Style::default().fg(Color::DarkGray))
-    .alignment(Alignment::Center);
+    .alignment(Alignment::Center)
+    .wrap(Wrap { trim: false });
 
     frame.render_widget(footer, area);
 }
