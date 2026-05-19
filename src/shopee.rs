@@ -522,8 +522,13 @@ fn handle_callback_stream(pool: Option<&PgPool>, stream: &mut TcpStream) -> Call
         }
     };
     let request = String::from_utf8_lossy(&buffer[..size]);
-    let Some(code) = extract_code_from_http_request(&request) else {
+    if is_push_request(&request) {
         return CallbackResult::WebhookAccepted;
+    }
+    let Some(code) = extract_code_from_http_request(&request) else {
+        return CallbackResult::Error(ShopeeError::Api(String::from(
+            "callback OAuth recebido sem code",
+        )));
     };
     let runtime = match tokio::runtime::Runtime::new() {
         Ok(runtime) => runtime,
@@ -539,6 +544,12 @@ fn handle_callback_stream(pool: Option<&PgPool>, stream: &mut TcpStream) -> Call
     }
 }
 
+fn is_push_request(request: &str) -> bool {
+    request_path(request)
+        .map(|path| path.trim_start_matches('/').starts_with("shopee/push"))
+        .unwrap_or(false)
+}
+
 fn write_http_response(stream: &mut TcpStream, body: &str) -> std::io::Result<()> {
     let response = format!(
         "HTTP/1.1 200 OK\r\nContent-Type: text/plain; charset=utf-8\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{}",
@@ -549,8 +560,7 @@ fn write_http_response(stream: &mut TcpStream, body: &str) -> std::io::Result<()
 }
 
 fn extract_code_from_http_request(request: &str) -> Option<String> {
-    let first_line = request.lines().next()?;
-    let path = first_line.split_whitespace().nth(1)?;
+    let path = request_path(request)?;
     let query = path.split_once('?')?.1;
     for part in query.split('&') {
         if let Some(code) = part.strip_prefix("code=") {
@@ -558,6 +568,10 @@ fn extract_code_from_http_request(request: &str) -> Option<String> {
         }
     }
     None
+}
+
+fn request_path(request: &str) -> Option<&str> {
+    request.lines().next()?.split_whitespace().nth(1)
 }
 
 fn non_empty_owned(value: &str) -> Option<String> {
@@ -812,6 +826,13 @@ mod tests {
             extract_code_from_http_request(request),
             Some(String::from("abc 123"))
         );
+    }
+
+    #[test]
+    fn push_request_is_not_treated_as_oauth_callback() {
+        let request = "POST /shopee/push HTTP/1.1\r\nHost: localhost\r\n\r\n{}";
+        assert!(is_push_request(request));
+        assert_eq!(extract_code_from_http_request(request), None);
     }
 
     #[test]
