@@ -150,6 +150,7 @@ fn render_update_form(
     confirm: bool,
     plans: &[ShopeeListingUpdatePlan],
 ) {
+    let mut selected_row = 4usize;
     let mut rows = vec![
         Line::from("Atualiza anuncios existentes por SKU Pai (item_sku)."),
         Line::from(
@@ -163,6 +164,9 @@ fn render_update_form(
     } else {
         rows.extend(tecidos.iter().enumerate().map(|(index, tecido)| {
             let current = index == selected;
+            if current {
+                selected_row = 4 + index;
+            }
             Line::from(vec![
                 Span::styled(if current { "> " } else { "  " }, selected_style(current)),
                 Span::styled(tecido.sku.clone(), Style::default().fg(Color::Yellow)),
@@ -221,8 +225,16 @@ fn render_update_form(
                 .title("Shopee > Atualizar anuncios")
                 .borders(Borders::ALL),
         )
+        .scroll((update_scroll_offset(area, selected_row, 0) as u16, 0))
         .wrap(Wrap { trim: false });
     frame.render_widget(widget, area);
+}
+
+fn update_scroll_offset(area: Rect, selected_row: usize, extra_bottom_rows: usize) -> usize {
+    let visible_rows = area.height.saturating_sub(2).max(1) as usize;
+    selected_row
+        .saturating_add(1 + extra_bottom_rows)
+        .saturating_sub(visible_rows)
 }
 
 fn render_stock_groups(
