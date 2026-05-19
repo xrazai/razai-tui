@@ -530,7 +530,7 @@ impl App {
                             String::from("Cadastre um tecido antes de criar anuncio Shopee.");
                     } else if parse_price(&self.shopee_listing_price).is_none() {
                         self.shopee_status =
-                            String::from("Informe um preco valido para o anuncio Shopee.");
+                            String::from("Informe um preco por metro valido para o anuncio Shopee.");
                     } else {
                         self.shopee_listing_confirm = true;
                         self.shopee_status = String::from(
@@ -674,7 +674,7 @@ impl App {
             return;
         };
         let Some(price) = parse_price(&self.shopee_listing_price) else {
-            self.shopee_status = String::from("Informe um preco valido para o anuncio Shopee.");
+            self.shopee_status = String::from("Informe um preco por metro valido para o anuncio Shopee.");
             self.shopee_listing_confirm = false;
             return;
         };

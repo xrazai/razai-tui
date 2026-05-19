@@ -82,7 +82,7 @@ fn render_listing_form(
         Line::from("Categoria: Roupas Femininas > Tecidos > Outros"),
         Line::from("Marca: Razai Tecidos | Condicao: Novo | Status: NORMAL"),
         Line::from(format!(
-            "Preco: {}",
+            "Preco por metro: {}",
             if price.is_empty() { "<digite>" } else { price }
         )),
         Line::from("Enter seleciona/confirma | digite preco | Backspace apaga | Esc cancela"),
