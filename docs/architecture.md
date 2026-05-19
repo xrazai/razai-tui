@@ -16,7 +16,7 @@ O projeto e uma TUI em Rust com `ratatui`, banco local PostgreSQL e chat lateral
 | `src/app/configuracoes.rs` | Eventos da aba Configuracoes e leitura de impressoras do Windows. |
 | `src/app/pedidos.rs` | Eventos da aba Pedidos, geracao de PDF e compartilhamento nativo do Windows. |
 | `src/app/documentos.rs` | Eventos da aba Documentos e geracao do checklist de vinculos. |
-| `src/app/documentos/pdf.rs` | Layout e escrita do PDF de checklist em `pdf_documentos/`. |
+| `src/app/documentos/pdf.rs` | Layout e escrita do PDF de checklist em `Documents\Razai\checklists`. |
 | `src/shopee.rs` | Cliente Shopee, assinatura HMAC, OAuth/callback, refresh de tokens, estoque online e sync por SKU. |
 | `src/screens/chrome.rs` | Header, tabs, footer e chat. |
 | `src/screens/dados.rs` | Renderizacao de listas da aba Dados. |
@@ -85,9 +85,9 @@ Pedidos ficam persistidos em `pedidos` e `pedido_itens` com status `pendente` ou
 
 ## Documentos
 
-A aba `Documentos` concentra documentos operacionais que nao alteram o banco. O fluxo `Imprimir Checklist` permite selecionar tecidos e gerar um PDF em `pdf_documentos/` com os vinculos cadastrados.
+A aba `Documentos` concentra documentos operacionais que nao alteram o banco. O fluxo `Imprimir Checklist` permite selecionar tecidos e gerar um PDF em `Documents\Razai\checklists` com os vinculos cadastrados. A pasta fica fora do workspace para nao disparar reinicio quando o app roda por `cargo watch`.
 
-O PDF e montado por `src/app/documentos/pdf.rs` com uma tabela por tecido selecionado. Cada tabela contem thumbnail da cor, tecido, nome da cor e checkbox de conferencia. Antes de desenhar uma tabela, o gerador calcula a altura necessaria e inicia nova pagina quando a tabela nao cabe no espaco restante, evitando cortes de pagina no meio de uma tabela sempre que possivel.
+O PDF e montado por `src/app/documentos/pdf.rs` com uma tabela por tecido selecionado. Cada tabela contem thumbnail da cor, tecido, nome da cor e checkbox de conferencia. Antes de desenhar uma tabela, o gerador calcula a altura necessaria e inicia nova pagina quando a tabela nao cabe no espaco restante, evitando cortes de pagina no meio de uma tabela sempre que possivel. Depois de gravar o arquivo, o app aciona o verbo `print` do Windows para abrir a impressao; se nao houver suporte, tenta abrir o PDF como fallback.
 
 ## Shopee
 

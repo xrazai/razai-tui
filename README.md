@@ -107,7 +107,9 @@ A aba `Documentos` fica antes de `Configuracoes` e possui:
 
 1. `Imprimir Checklist`
 
-O checklist permite marcar um ou mais tecidos com `Space` e gerar o PDF com `Ctrl+Enter` ou pela opcao `[Gerar PDF]`. O arquivo e salvo em `pdf_documentos/`.
+O checklist permite marcar um ou mais tecidos com `Space` e gerar o PDF com `Ctrl+Enter` ou pela opcao `[Gerar PDF]`. O arquivo e salvo fora do workspace, em `Documents\Razai\checklists`, para nao reiniciar o app quando ele estiver rodando com `cargo watch`.
+
+Depois de gerar, o sistema chama a acao de impressao do Windows para o PDF. Se o visualizador padrao nao oferecer impressao direta, o sistema tenta abrir o PDF como fallback.
 
 O PDF separa uma tabela para cada tecido selecionado. Cada linha mostra:
 

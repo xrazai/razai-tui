@@ -1,6 +1,13 @@
-use std::{fs, panic, path::Path, path::PathBuf, process::Command};
+use std::{env, fs, panic, path::Path, path::PathBuf};
 
 use crossterm::event::KeyCode;
+use windows::{
+    Win32::{
+        Foundation::HWND,
+        UI::{Shell::ShellExecuteW, WindowsAndMessaging::SW_SHOWNORMAL},
+    },
+    core::PCWSTR,
+};
 
 use super::App;
 use crate::{db, models::Section};
@@ -131,13 +138,13 @@ impl App {
 
         match write_result.and_then(|result| result) {
             Ok(()) => {
-                self.db_status = match abrir_pdf_checklist(&path) {
+                self.db_status = match abrir_impressao_checklist(&path) {
                     Ok(()) => format!(
-                        "Checklist gerado e aberto para impressao: {}",
+                        "Checklist gerado e enviado para a tela de impressao: {}",
                         path.display()
                     ),
                     Err(error) => format!(
-                        "Checklist gerado em {}. Falha ao abrir automaticamente: {error}",
+                        "Checklist gerado em {}. Falha ao abrir impressao: {error}",
                         path.display()
                     ),
                 };
@@ -148,7 +155,7 @@ impl App {
 }
 
 fn checklist_pdf_path() -> Result<PathBuf, String> {
-    let dir = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("pdf_documentos");
+    let dir = checklist_pdf_dir();
     fs::create_dir_all(&dir).map_err(|error| format!("falha ao criar pasta de PDFs: {error}"))?;
     Ok(dir.join(format!(
         "razai_checklist_{}.pdf",
@@ -156,13 +163,47 @@ fn checklist_pdf_path() -> Result<PathBuf, String> {
     )))
 }
 
-fn abrir_pdf_checklist(path: &Path) -> Result<(), String> {
+fn checklist_pdf_dir() -> PathBuf {
+    env::var_os("USERPROFILE")
+        .map(PathBuf::from)
+        .map(|home| home.join("Documents").join("Razai").join("checklists"))
+        .unwrap_or_else(|| env::temp_dir().join("Razai").join("checklists"))
+}
+
+fn abrir_impressao_checklist(path: &Path) -> Result<(), String> {
     let path = path
         .canonicalize()
         .map_err(|error| format!("nao foi possivel localizar o PDF: {error}"))?;
-    Command::new("explorer")
-        .arg(path)
-        .spawn()
-        .map_err(|error| format!("nao foi possivel abrir o PDF: {error}"))?;
+    shell_execute_pdf("print", &path).or_else(|print_error| {
+        shell_execute_pdf("open", &path).map_err(|open_error| {
+            format!("print falhou: {print_error}; abrir PDF tambem falhou: {open_error}")
+        })
+    })?;
     Ok(())
+}
+
+fn shell_execute_pdf(verb: &str, path: &Path) -> Result<(), String> {
+    let verb = wide_null(verb);
+    let file = wide_null(&path.to_string_lossy());
+    let result = unsafe {
+        ShellExecuteW(
+            Some(HWND::default()),
+            PCWSTR(verb.as_ptr()),
+            PCWSTR(file.as_ptr()),
+            PCWSTR::null(),
+            PCWSTR::null(),
+            SW_SHOWNORMAL,
+        )
+    };
+    if result.0 as isize <= 32 {
+        return Err(format!(
+            "ShellExecuteW falhou com codigo {}",
+            result.0 as isize
+        ));
+    }
+    Ok(())
+}
+
+fn wide_null(value: &str) -> Vec<u16> {
+    value.encode_utf16().chain(std::iter::once(0)).collect()
 }
