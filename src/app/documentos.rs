@@ -1,4 +1,4 @@
-use std::{fs, path::PathBuf};
+use std::{fs, panic, path::PathBuf};
 
 use crossterm::event::KeyCode;
 
@@ -124,7 +124,12 @@ impl App {
             }
         };
 
-        match pdf::write_checklist_pdf(&path, &sections) {
+        let write_result = panic::catch_unwind(|| pdf::write_checklist_pdf(&path, &sections))
+            .map_err(|_| {
+                String::from("falha interna ao gerar checklist; tente menos tecidos por PDF")
+            });
+
+        match write_result.and_then(|result| result) {
             Ok(()) => {
                 self.db_status = format!("Checklist gerado em {}", path.display());
                 self.checklist_active = false;

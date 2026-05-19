@@ -59,9 +59,7 @@ fn checklist_pdf_bytes(sections: &[ChecklistSection]) -> Result<Vec<u8>, String>
 
     draw_header(&mut canvas, page_number);
     for section in sections {
-        let rows = section.vinculos.len().max(1);
-        let needed_height = SECTION_HEADER_HEIGHT + TABLE_HEADER_HEIGHT + rows as f64 * ROW_HEIGHT;
-        if y - needed_height < PAGE_BOTTOM {
+        if y - MIN_SECTION_HEIGHT < PAGE_BOTTOM {
             draw_footer(&mut canvas, page_number);
             pages.push(PdfPage::new(Mm(210.0), Mm(297.0), canvas.into_ops()));
             page_number += 1;
@@ -69,7 +67,27 @@ fn checklist_pdf_bytes(sections: &[ChecklistSection]) -> Result<Vec<u8>, String>
             draw_header(&mut canvas, page_number);
             y = PAGE_TOP;
         }
-        y = draw_section(&mut canvas, section, y);
+
+        let mut row_y = draw_section_header(&mut canvas, section, y, false);
+        if section.vinculos.is_empty() {
+            draw_empty_row(&mut canvas, row_y);
+            y = row_y - ROW_HEIGHT - 12.0;
+            continue;
+        }
+
+        for (index, vinculo) in section.vinculos.iter().enumerate() {
+            if row_y - ROW_HEIGHT < PAGE_BOTTOM {
+                draw_footer(&mut canvas, page_number);
+                pages.push(PdfPage::new(Mm(210.0), Mm(297.0), canvas.into_ops()));
+                page_number += 1;
+                canvas = PdfCanvas::new(fonts.clone());
+                draw_header(&mut canvas, page_number);
+                row_y = draw_section_header(&mut canvas, section, PAGE_TOP, true);
+            }
+            draw_row(&mut canvas, vinculo, row_y, index % 2 == 0);
+            row_y -= ROW_HEIGHT;
+        }
+        y = row_y - 12.0;
     }
     draw_footer(&mut canvas, page_number);
     pages.push(PdfPage::new(Mm(210.0), Mm(297.0), canvas.into_ops()));
@@ -88,6 +106,7 @@ const SECTION_HEADER_HEIGHT: f64 = 30.0;
 const TABLE_HEADER_HEIGHT: f64 = 22.0;
 const ROW_HEIGHT: f64 = 50.0;
 const THUMB: f64 = 42.5;
+const MIN_SECTION_HEIGHT: f64 = SECTION_HEADER_HEIGHT + TABLE_HEADER_HEIGHT + ROW_HEIGHT;
 
 fn draw_header(canvas: &mut PdfCanvas, page: usize) {
     canvas.text(FontKind::Bold, 24.0, LEFT, 780.0, "RAZAI", 0.10);
@@ -130,7 +149,12 @@ fn draw_footer(canvas: &mut PdfCanvas, page: usize) {
     );
 }
 
-fn draw_section(canvas: &mut PdfCanvas, section: &ChecklistSection, y: f64) -> f64 {
+fn draw_section_header(
+    canvas: &mut PdfCanvas,
+    section: &ChecklistSection,
+    y: f64,
+    continued: bool,
+) -> f64 {
     canvas.rect(
         LEFT,
         y - SECTION_HEADER_HEIGHT + 8.0,
@@ -143,27 +167,24 @@ fn draw_section(canvas: &mut PdfCanvas, section: &ChecklistSection, y: f64) -> f
         12.0,
         LEFT + 10.0,
         y - 10.0,
-        &format!(
-            "{} - {}",
-            section.tecido.sku,
-            truncate_text(&section.tecido.nome, 70)
-        ),
+        &if continued {
+            format!(
+                "{} - {} (continuacao)",
+                section.tecido.sku,
+                truncate_text(&section.tecido.nome, 55)
+            )
+        } else {
+            format!(
+                "{} - {}",
+                section.tecido.sku,
+                truncate_text(&section.tecido.nome, 70)
+            )
+        },
         0.12,
     );
     let table_top = y - SECTION_HEADER_HEIGHT;
     draw_table_header(canvas, table_top);
-
-    let mut row_y = table_top - TABLE_HEADER_HEIGHT;
-    if section.vinculos.is_empty() {
-        draw_empty_row(canvas, row_y);
-        row_y -= ROW_HEIGHT;
-    } else {
-        for (index, vinculo) in section.vinculos.iter().enumerate() {
-            draw_row(canvas, vinculo, row_y, index % 2 == 0);
-            row_y -= ROW_HEIGHT;
-        }
-    }
-    row_y - 12.0
+    table_top - TABLE_HEADER_HEIGHT
 }
 
 fn draw_table_header(canvas: &mut PdfCanvas, y: f64) {
@@ -448,6 +469,39 @@ mod tests {
         let path = std::env::temp_dir().join("razai_checklist_test.pdf");
         write_checklist_pdf(&path, &[ChecklistSection { tecido, vinculos }]).unwrap();
         assert!(path.is_file());
+        let _ = std::fs::remove_file(path);
+    }
+
+    #[test]
+    fn writes_large_checklist_without_panic() {
+        let tecido = TecidoRecord {
+            id: 1,
+            nome: String::from("Helanca"),
+            sku: String::from("HELA"),
+            composicao: String::from("Poliester"),
+            largura_m: 1.5,
+            tipo: String::from("Liso"),
+            transparencia: String::from("Baixa"),
+            elasticidade: String::from("Baixa"),
+            acabamento: String::from("Padrao"),
+            rendimento_m_kg: None,
+            gramatura_linear_g_m: Some(120),
+            gramatura_g_m2: None,
+        };
+        let vinculos = (0..250)
+            .map(|index| VinculoRecord {
+                cor_id: index,
+                tecido_nome: tecido.nome.clone(),
+                cor_nome: format!("Cor {index}"),
+                cor_hex: Some(String::from("#22AA99")),
+                sku: Some(format!("HELA-{index}")),
+            })
+            .collect::<Vec<_>>();
+        let path = std::env::temp_dir().join("razai_checklist_large_test.pdf");
+        write_checklist_pdf(&path, &[ChecklistSection { tecido, vinculos }]).unwrap();
+        assert!(path.is_file());
+        let metadata = std::fs::metadata(&path).unwrap();
+        assert!(metadata.len() > 0);
         let _ = std::fs::remove_file(path);
     }
 }
