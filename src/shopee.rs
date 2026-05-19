@@ -36,7 +36,6 @@ const SHOPEE_FABRIC_CATEGORY_LABEL: &str = "Roupas Femininas > Tecidos > Outros"
 const SHOPEE_FABRIC_NCM: &str = "55161300";
 const SHOPEE_MAX_MODEL_PRICE_RATIO: f64 = 5.0;
 const SHOPEE_STOCK_FETCH_CONCURRENCY: usize = 8;
-const SHOPEE_MAX_TIER_OPTIONS: usize = 20;
 static CALLBACK_LISTENER_STARTED: AtomicBool = AtomicBool::new(false);
 
 #[derive(Clone)]
@@ -1196,15 +1195,6 @@ fn build_listing_update_plan(
         ));
     }
 
-    if existing_colors.len() > SHOPEE_MAX_TIER_OPTIONS || sizes.len() > SHOPEE_MAX_TIER_OPTIONS {
-        return Ok(blocked_listing_update_plan(
-            item_id,
-            item_name,
-            parent_sku,
-            "tier de cor ou tamanho excede 20 opcoes",
-        ));
-    }
-
     let remote_models = remote_listing_models(model_response);
     let color_matches =
         listing_color_matches(vinculos, local_colors, &existing_colors, &remote_models);
@@ -1214,15 +1204,6 @@ fn build_listing_update_plan(
         .map(|match_info| match_info.color.clone())
         .collect::<Vec<_>>();
     let final_color_count = existing_colors.len() + missing_colors.len();
-    if final_color_count > SHOPEE_MAX_TIER_OPTIONS {
-        return Ok(blocked_listing_update_plan(
-            item_id,
-            item_name,
-            parent_sku,
-            "total de cores passaria de 20 opcoes",
-        ));
-    }
-
     let final_model_count = final_color_count * sizes.len();
     if final_model_count > 100 {
         return Ok(blocked_listing_update_plan(
@@ -2919,46 +2900,6 @@ mod tests {
 
         assert!(plan.missing_colors.is_empty());
         assert_eq!(plan.model_count, 0);
-    }
-
-    #[test]
-    fn listing_update_blocks_when_color_options_exceed_twenty() {
-        let tecido = test_tecido(300);
-        let vinculos = (0..21)
-            .map(|index| test_vinculo(&tecido, index, &format!("Cor {index}"), "ANAR-COR"))
-            .collect::<Vec<_>>();
-        let local_colors = listing_colors(&vinculos).unwrap();
-        let response = json!({
-            "tier_variation": [
-                {"name": "Cor", "option_list": []},
-                {"name": "Tamanho", "option_list": [
-                    {"option": "1m"}
-                ]}
-            ],
-            "model": []
-        });
-        let mut response = response;
-        response["tier_variation"][0]["option_list"] = json!(
-            (0..20)
-                .map(|index| json!({"option": format!("Remota {index}")}))
-                .collect::<Vec<_>>()
-        );
-
-        let plan = build_listing_update_plan(
-            &tecido,
-            &vinculos,
-            &local_colors,
-            100,
-            "Anarruga",
-            "ANAR",
-            &response,
-        )
-        .unwrap();
-
-        assert_eq!(
-            plan.blocked_reason.as_deref(),
-            Some("total de cores passaria de 20 opcoes")
-        );
     }
 
     #[test]
