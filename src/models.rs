@@ -106,7 +106,7 @@ pub enum DadosScreen {
     VinculoDetalhe,
 }
 
-#[derive(Clone, Copy, Default, Eq, PartialEq)]
+#[derive(Clone, Copy, Default, Eq, Hash, PartialEq)]
 pub enum VinculoImageSlot {
     #[default]
     Original,
@@ -151,6 +151,16 @@ impl VinculoImageSlot {
 
     pub fn index(self) -> usize {
         Self::ALL.iter().position(|slot| *slot == self).unwrap_or(0)
+    }
+
+    pub fn from_shortcut(character: char) -> Option<Self> {
+        match character {
+            '1' => Some(Self::Original),
+            '2' => Some(Self::Brand),
+            '3' => Some(Self::Modelo),
+            '4' => Some(Self::Alternativa),
+            _ => None,
+        }
     }
 }
 

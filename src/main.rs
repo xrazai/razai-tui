@@ -16,6 +16,7 @@ use crossterm::{
     terminal::{EnterAlternateScreen, LeaveAlternateScreen, disable_raw_mode, enable_raw_mode},
 };
 use ratatui::{Terminal, backend::CrosstermBackend};
+use ratatui_image::picker::{Picker, ProtocolType};
 
 fn main() -> io::Result<()> {
     dotenvy::dotenv().ok();
@@ -86,6 +87,7 @@ fn main() -> io::Result<()> {
     };
 
     let mut terminal = setup_terminal()?;
+    let (image_picker, image_protocol_status) = detect_image_picker();
     let app_result = App::new(
         pool,
         tecidos,
@@ -96,6 +98,8 @@ fn main() -> io::Result<()> {
         vendas_historico,
         pedidos_historico,
         shopee_status,
+        image_picker,
+        image_protocol_status,
         db_runtime,
     )
     .run(&mut terminal);
@@ -114,4 +118,65 @@ fn restore_terminal(terminal: &mut Terminal<CrosstermBackend<io::Stdout>>) -> io
     disable_raw_mode()?;
     execute!(terminal.backend_mut(), LeaveAlternateScreen)?;
     terminal.show_cursor()
+}
+
+fn detect_image_picker() -> (Picker, String) {
+    let detected_picker = Picker::from_query_stdio().unwrap_or_else(|_| Picker::halfblocks());
+    let override_value = std::env::var("RAZAI_IMAGE_PROTOCOL")
+        .ok()
+        .map(|value| value.trim().to_ascii_lowercase())
+        .filter(|value| !value.is_empty());
+
+    let Some(override_value) = override_value else {
+        let status = image_protocol_status(detected_picker.protocol_type(), false, false);
+        return (detected_picker, status);
+    };
+
+    if override_value == "auto" {
+        let status = image_protocol_status(detected_picker.protocol_type(), false, false);
+        return (detected_picker, status);
+    }
+
+    let Some(protocol_type) = parse_image_protocol_override(&override_value) else {
+        let status = image_protocol_status(detected_picker.protocol_type(), false, true);
+        return (detected_picker, status);
+    };
+
+    let mut picker = detected_picker;
+    picker.set_protocol_type(protocol_type);
+    let status = image_protocol_status(protocol_type, true, false);
+    (picker, status)
+}
+
+fn parse_image_protocol_override(value: &str) -> Option<ProtocolType> {
+    match value {
+        "halfblocks" | "halfblock" | "blocks" => Some(ProtocolType::Halfblocks),
+        "sixel" => Some(ProtocolType::Sixel),
+        "kitty" => Some(ProtocolType::Kitty),
+        "iterm2" | "iterm" => Some(ProtocolType::Iterm2),
+        _ => None,
+    }
+}
+
+fn image_protocol_status(
+    protocol_type: ProtocolType,
+    forced_override: bool,
+    invalid_override: bool,
+) -> String {
+    let label = match protocol_type {
+        ProtocolType::Halfblocks => "Halfblocks",
+        ProtocolType::Sixel => "Sixel",
+        ProtocolType::Kitty => "Kitty",
+        ProtocolType::Iterm2 => "iTerm2",
+    };
+
+    if invalid_override {
+        format!("Preview: {label} fallback (override invalido)")
+    } else if forced_override {
+        format!("Preview: override {label}")
+    } else if protocol_type == ProtocolType::Halfblocks {
+        String::from("Preview: Halfblocks fallback")
+    } else {
+        format!("Preview: {label}")
+    }
 }

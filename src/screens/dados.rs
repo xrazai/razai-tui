@@ -314,21 +314,13 @@ fn render_vinculos_lista(
     let items = vinculos.iter().enumerate().map(|(index, vinculo)| {
         let sku = vinculo.sku.as_deref().unwrap_or("sem-sku");
         let hex = vinculo.cor_hex.as_deref().unwrap_or("#");
-        let image_marker = if vinculo.has_imagem_original
-            || vinculo.has_imagem_brand
-            || vinculo.has_imagem_modelo
-            || vinculo.has_imagem_alternativa
-        {
-            " img"
-        } else {
-            ""
-        };
+        let image_count = App::vinculo_record_image_count(vinculo);
         ListItem::new(Line::from(vec![
             Span::raw(format!(
-                "{}. {}{} - {} / ",
+                "{}. [{}/4] {} - {} / ",
                 index + 1,
+                image_count,
                 sku,
-                image_marker,
                 vinculo.tecido_nome
             )),
             color_swatch(hex),
@@ -354,7 +346,7 @@ fn render_vinculo_detalhe(frame: &mut Frame, area: Rect, app: &App) {
     };
     let chunks = Layout::default()
         .direction(Direction::Horizontal)
-        .constraints([Constraint::Min(54), Constraint::Length(30)])
+        .constraints([Constraint::Min(54), Constraint::Length(46)])
         .split(area);
 
     let slot_items = VinculoImageSlot::ALL.iter().map(|slot| {
@@ -365,15 +357,20 @@ fn render_vinculo_detalhe(frame: &mut Frame, area: Rect, app: &App) {
             VinculoImageSlot::Alternativa => app.vinculo_images.imagem_alternativa.is_some(),
         };
         let marker = if has_image { "[+]" } else { "[ ]" };
-        ListItem::new(format!("{marker} {}", slot.title()))
+        ListItem::new(format!("{} {marker} {}", slot.index() + 1, slot.title()))
     });
+    let current_count = app.vinculo_current_image_count();
     let mut state = ListState::default().with_selected(Some(app.vinculo_image_slot.index()));
     let detail = List::new(slot_items)
         .block(
             Block::default()
                 .title(format!(
-                    "Vinculo > {} / {}",
-                    vinculo.tecido_nome, vinculo.cor_nome
+                    "Vinculo {}/{} > {} / {} > Imagens {}/4",
+                    app.vinculo_lista_option + 1,
+                    app.vinculos.len(),
+                    vinculo.tecido_nome,
+                    vinculo.cor_nome,
+                    current_count
                 ))
                 .borders(Borders::ALL),
         )
@@ -384,7 +381,7 @@ fn render_vinculo_detalhe(frame: &mut Frame, area: Rect, app: &App) {
     let preview = chunks[1];
     frame.render_widget(
         Block::default()
-            .title("Thumbnail original")
+            .title(format!("Thumbnail {}", app.vinculo_image_slot.title()))
             .borders(Borders::ALL),
         preview,
     );
@@ -392,20 +389,38 @@ fn render_vinculo_detalhe(frame: &mut Frame, area: Rect, app: &App) {
         horizontal: 1,
         vertical: 1,
     });
-    if let Some(protocol) = &app.vinculo_thumbnail {
+    if let Some(started_at) = app.vinculo_image_upload_started {
+        let spinner = ["|", "/", "-", "\\"][(started_at.elapsed().as_millis() as usize / 250) % 4];
+        frame.render_widget(
+            Paragraph::new(format!(
+                "{spinner} Salvando imagem...\n\nAguarde o upload terminar para continuar."
+            ))
+            .style(Style::default().fg(Color::Yellow)),
+            inner,
+        );
+    } else if let Some(protocol) = &app.vinculo_thumbnail {
         frame.render_widget(TuiImage::new(protocol).allow_clipping(true), inner);
     } else {
-        let text = if app.vinculo_images.imagem_original.is_some() {
-            "Imagem original salva, mas sem preview neste terminal."
+        let has_selected_image = match app.vinculo_image_slot {
+            VinculoImageSlot::Original => app.vinculo_images.imagem_original.is_some(),
+            VinculoImageSlot::Brand => app.vinculo_images.imagem_brand.is_some(),
+            VinculoImageSlot::Modelo => app.vinculo_images.imagem_modelo.is_some(),
+            VinculoImageSlot::Alternativa => app.vinculo_images.imagem_alternativa.is_some(),
+        };
+        let text = if has_selected_image {
+            "Imagem salva, mas sem preview neste terminal."
         } else {
-            "Sem imagem original."
+            "Sem imagem neste slot."
         };
         frame.render_widget(Paragraph::new(text), inner);
     }
 
     frame.render_widget(
-        Paragraph::new("Enter abre a janela do Windows para selecionar a imagem.")
-            .style(Style::default().fg(Color::DarkGray)),
+        Paragraph::new(format!(
+            "1-4 slot | Enter upload e avanca | Tab proximo vinculo | Shift+Tab anterior | {}",
+            app.image_protocol_status
+        ))
+        .style(Style::default().fg(Color::DarkGray)),
         Rect {
             x: chunks[0].x.saturating_add(2),
             y: chunks[0].y + chunks[0].height.saturating_sub(2),

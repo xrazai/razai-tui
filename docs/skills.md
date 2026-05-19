@@ -11,7 +11,7 @@ O chat lateral usa um unico agente: **Razai Master**. A tela atual define apenas
 | `dados.cores` | Criar e consultar cores, validando hexadecimal e SKU. |
 | `dados.estampas` | Criar e consultar estampas com SKU automatico. |
 | `dados.vinculos` | Criar e consultar vinculos entre tecido e cor/estampa. |
-| `dados.vinculos.imagens` | Orientar o upload local das quatro imagens de um vinculo e a leitura do thumbnail no terminal. |
+| `dados.vinculos.imagens` | Orientar o upload local das quatro imagens de um vinculo, atalhos produtivos, progresso `[n/4]` e leitura do thumbnail no terminal. |
 | `vendas` | Lançar itens, consultar historico, filtrar periodo e abrir venda por id. |
 | `pedidos` | Lançar itens, gerar PDF, compartilhar pelo Windows e aprovar pedido como venda. |
 | `documentos` | Orientar a emissao de documentos operacionais, como checklist PDF de vinculos por tecido. |
@@ -27,7 +27,7 @@ Acoes locais ja mapeadas:
 
 - cadastrar tecido, cor e estampa;
 - criar vinculo tecido + cor/estampa;
-- orientar cadastro de imagens no detalhe do vinculo;
+- orientar cadastro de imagens no detalhe do vinculo, incluindo `1-4`, `Tab`, `Shift+Tab`, protocolo de preview e cuidados com Google Drive parcialmente sincronizado;
 - lançar item de venda;
 - lançar item de pedido;
 - orientar emissao do checklist de vinculos em PDF;

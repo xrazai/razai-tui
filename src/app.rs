@@ -1,4 +1,6 @@
 use std::{
+    collections::HashMap,
+    io,
     sync::mpsc::{self, Receiver},
     thread,
     time::Duration,
@@ -32,8 +34,17 @@ mod documentos;
 mod pedidos;
 mod vendas;
 
-use ratatui_image::protocol::Protocol as ImageProtocol;
-use std::io;
+use ratatui_image::{picker::Picker, protocol::Protocol as ImageProtocol};
+
+type VinculoThumbnailCacheKey = (i64, i64, bool, VinculoImageSlot);
+
+struct VinculoImageUploadResult {
+    tecido_id: i64,
+    item_id: i64,
+    usa_estampas: bool,
+    slot: VinculoImageSlot,
+    result: Result<(), String>,
+}
 
 #[derive(Clone, Copy)]
 enum ShopeeStockCursorTarget {
@@ -54,6 +65,11 @@ pub struct App {
     pub vinculo_image_slot: VinculoImageSlot,
     pub vinculo_images: VinculoImages,
     pub vinculo_thumbnail: Option<ImageProtocol>,
+    pub vinculo_thumbnail_cache: HashMap<VinculoThumbnailCacheKey, ImageProtocol>,
+    pub image_picker: Picker,
+    pub image_protocol_status: String,
+    pub vinculo_image_upload_started: Option<Instant>,
+    vinculo_image_upload_rx: Option<Receiver<VinculoImageUploadResult>>,
     pub tecidos: Vec<TecidoRecord>,
     pub cores: Vec<CorRecord>,
     pub estampas: Vec<EstampaRecord>,
@@ -154,6 +170,8 @@ impl App {
         vendas_historico: Vec<VendaHistoricoRecord>,
         pedidos_historico: Vec<PedidoRecord>,
         shopee_status: String,
+        image_picker: Picker,
+        image_protocol_status: String,
         db_runtime: Runtime,
     ) -> Self {
         let printers = configuracoes::list_installed_printers();
@@ -177,6 +195,11 @@ impl App {
             vinculo_image_slot: VinculoImageSlot::default(),
             vinculo_images: VinculoImages::default(),
             vinculo_thumbnail: None,
+            vinculo_thumbnail_cache: HashMap::new(),
+            image_picker,
+            image_protocol_status,
+            vinculo_image_upload_started: None,
+            vinculo_image_upload_rx: None,
             tecidos,
             cores,
             estampas,
@@ -276,6 +299,7 @@ impl App {
 
         while self.running {
             self.drain_chat_reply();
+            self.drain_vinculo_image_upload();
             terminal.draw(|frame| self.render(frame))?;
 
             let timeout = Duration::from_millis(250)
@@ -312,6 +336,14 @@ impl App {
     fn handle_key(&mut self, key: KeyEvent) {
         if key.code == KeyCode::Char('c') && key.modifiers.contains(KeyModifiers::CONTROL) {
             self.running = false;
+            return;
+        }
+
+        if self.section == Section::Dados
+            && self.dados_screen == DadosScreen::VinculoDetalhe
+            && matches!(key.code, KeyCode::Tab | KeyCode::BackTab)
+        {
+            self.navigate_vinculo_detalhe(key.code);
             return;
         }
 
@@ -367,6 +399,12 @@ impl App {
         }
 
         match key.code {
+            KeyCode::Char(character)
+                if self.section == Section::Dados
+                    && self.dados_screen == DadosScreen::VinculoDetalhe =>
+            {
+                self.select_vinculo_image_slot_shortcut(character);
+            }
             KeyCode::Enter
                 if key.modifiers.contains(KeyModifiers::CONTROL)
                     && self.section == Section::Dados
@@ -396,9 +434,7 @@ impl App {
                 | DadosScreen::VinculosSelecionarTecidoVer => self.previous_vinculo_tecido(),
                 DadosScreen::VinculosSelecionarCores => self.previous_vinculo_criar_option(),
                 DadosScreen::VinculosLista => self.previous_vinculo_lista(),
-                DadosScreen::VinculoDetalhe => {
-                    self.vinculo_image_slot = self.vinculo_image_slot.previous()
-                }
+                DadosScreen::VinculoDetalhe => self.previous_vinculo_image_slot(),
                 DadosScreen::CadastrarTecido
                 | DadosScreen::CadastrarCor
                 | DadosScreen::CadastrarEstampa => {}
@@ -413,9 +449,7 @@ impl App {
                 | DadosScreen::VinculosSelecionarTecidoVer => self.next_vinculo_tecido(),
                 DadosScreen::VinculosSelecionarCores => self.next_vinculo_criar_option(),
                 DadosScreen::VinculosLista => self.next_vinculo_lista(),
-                DadosScreen::VinculoDetalhe => {
-                    self.vinculo_image_slot = self.vinculo_image_slot.next()
-                }
+                DadosScreen::VinculoDetalhe => self.next_vinculo_image_slot(),
                 DadosScreen::CadastrarTecido
                 | DadosScreen::CadastrarCor
                 | DadosScreen::CadastrarEstampa => {}
@@ -1240,10 +1274,19 @@ impl App {
         screens::chrome::render_header(frame, outer[0]);
         screens::chrome::render_tabs(frame, outer[1], self.section);
 
-        let body = Layout::default()
-            .direction(Direction::Horizontal)
-            .constraints([Constraint::Min(50), Constraint::Length(SIDE_PANEL_WIDTH)])
-            .split(outer[2]);
+        let hide_chat =
+            self.section == Section::Dados && self.dados_screen == DadosScreen::VinculoDetalhe;
+        let body = if hide_chat {
+            Layout::default()
+                .direction(Direction::Horizontal)
+                .constraints([Constraint::Min(50)])
+                .split(outer[2])
+        } else {
+            Layout::default()
+                .direction(Direction::Horizontal)
+                .constraints([Constraint::Min(50), Constraint::Length(SIDE_PANEL_WIDTH)])
+                .split(outer[2])
+        };
 
         match self.section {
             Section::Vendas => screens::vendas::render(frame, body[0], self),
@@ -1272,13 +1315,15 @@ impl App {
             section => screens::chrome::render_content(frame, body[0], section),
         }
 
-        screens::chrome::render_chat(
-            frame,
-            body[1],
-            &self.chat,
-            self.focus,
-            &self.active_context(),
-        );
+        if !hide_chat {
+            screens::chrome::render_chat(
+                frame,
+                body[1],
+                &self.chat,
+                self.focus,
+                &self.active_context(),
+            );
+        }
         screens::chrome::render_footer(frame, outer[3], &self.db_status, self.focus);
     }
 

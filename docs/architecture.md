@@ -50,7 +50,11 @@ Evitar arquivos com mais de 600 linhas. Se passar disso e houver um corte claro 
 
 Vinculos de tecidos lisos ficam em `tecido_cores`; vinculos de tecidos estampados ficam em `tecido_estampas`. Cada vinculo pode armazenar quatro imagens em colunas `BYTEA`: `imagem_original`, `imagem_brand`, `imagem_modelo` e `imagem_alternativa`.
 
-O fluxo de detalhe do vinculo abre a janela nativa do Windows para selecionar uma imagem local para cada slot. O app valida se o arquivo e uma imagem suportada antes de gravar no banco. A thumbnail no terminal usa `ratatui-image` com fallback halfblock, renderizando a `imagem_original` no painel lateral quando houver preview possivel.
+O fluxo de detalhe do vinculo abre a janela nativa do Windows para selecionar uma imagem local para cada slot. O app valida se o arquivo e uma imagem suportada antes de gravar no banco e tenta detectar leituras incompletas, principalmente em arquivos vindos de Google Drive/Drives compartilhados ainda nao sincronizados.
+
+A tela de detalhe de vinculo oculta o painel de agente/chat e usa a area principal inteira. Os atalhos `1` a `4` selecionam diretamente os slots de imagem, `Tab` avanca para o proximo vinculo e `Shift+Tab` volta para o anterior. Depois de salvar uma imagem, o app avanca para o proximo slot vazio; quando o vinculo fica completo, avanca para o proximo vinculo incompleto.
+
+A thumbnail no terminal usa `ratatui-image` com deteccao automatica de protocolo (`Sixel`, `Kitty`, `iTerm2` ou fallback `Halfblocks`). O protocolo pode ser forcado por `RAZAI_IMAGE_PROTOCOL=auto|sixel|kitty|iterm2|halfblocks`. A geracao do protocolo de imagem e cacheada em memoria por vinculo/slot e invalidada quando uma nova imagem e salva. A selecao nativa de arquivo e modal, mas a leitura/validacao/salvamento apos a escolha rodam em segundo plano e exibem indicador visual de salvamento.
 
 Ao atualizar os vinculos de um tecido, o app preserva os registros existentes e apenas remove os itens desmarcados; isso evita perder imagens ja cadastradas nos vinculos mantidos.
 

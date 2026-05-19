@@ -1,14 +1,21 @@
-use std::fs;
+use std::{
+    fs,
+    path::Path,
+    sync::mpsc,
+    thread,
+    time::{Duration, Instant},
+};
 
-use super::App;
+use super::{App, VinculoImageUploadResult};
 use crate::{
-    db::{self, TecidoRecord},
+    db::{self, TecidoRecord, VinculoRecord},
     models::*,
 };
 use crossterm::event::KeyCode;
-use image::ImageReader;
+use image::{DynamicImage, ImageError, ImageReader, imageops::FilterType};
 use ratatui::layout::Size;
-use ratatui_image::{Resize, picker::Picker};
+use ratatui_image::Resize;
+use sqlx::PgPool;
 
 mod navigation;
 
@@ -508,6 +515,7 @@ impl App {
         if self.vinculos.is_empty() {
             return;
         }
+        self.focus = Focus::System;
         self.vinculo_image_slot = VinculoImageSlot::Original;
         self.load_vinculo_images();
         self.dados_screen = DadosScreen::VinculoDetalhe;
@@ -515,6 +523,42 @@ impl App {
 
     pub(super) fn handle_vinculo_detalhe_enter(&mut self) {
         self.abrir_dialogo_e_salvar_vinculo_image();
+    }
+
+    pub(super) fn select_vinculo_image_slot_shortcut(&mut self, character: char) {
+        if let Some(slot) = VinculoImageSlot::from_shortcut(character) {
+            self.vinculo_image_slot = slot;
+            self.refresh_vinculo_thumbnail();
+        }
+    }
+
+    pub(super) fn next_vinculo_image_slot(&mut self) {
+        self.vinculo_image_slot = self.vinculo_image_slot.next();
+        self.refresh_vinculo_thumbnail();
+    }
+
+    pub(super) fn previous_vinculo_image_slot(&mut self) {
+        self.vinculo_image_slot = self.vinculo_image_slot.previous();
+        self.refresh_vinculo_thumbnail();
+    }
+
+    pub(super) fn navigate_vinculo_detalhe(&mut self, key: KeyCode) {
+        if self.vinculos.is_empty() {
+            return;
+        }
+
+        self.vinculo_lista_option = match key {
+            KeyCode::BackTab => {
+                (self.vinculo_lista_option + self.vinculos.len() - 1) % self.vinculos.len()
+            }
+            _ => (self.vinculo_lista_option + 1) % self.vinculos.len(),
+        };
+        self.vinculo_image_slot = VinculoImageSlot::Original;
+        self.load_vinculo_images();
+        if let Some(slot) = self.first_empty_vinculo_image_slot() {
+            self.vinculo_image_slot = slot;
+            self.refresh_vinculo_thumbnail();
+        }
     }
 
     pub(super) fn toggle_vinculo_cor(&mut self) {
@@ -638,6 +682,11 @@ impl App {
     }
 
     fn abrir_dialogo_e_salvar_vinculo_image(&mut self) {
+        if self.vinculo_image_upload_rx.is_some() {
+            self.db_status = String::from("Aguarde o upload da imagem atual terminar.");
+            return;
+        }
+
         let Some(path) = rfd::FileDialog::new()
             .set_title(self.vinculo_image_slot.title())
             .add_filter("Imagens", &["png", "jpg", "jpeg", "webp", "gif", "bmp"])
@@ -646,26 +695,6 @@ impl App {
             self.db_status = String::from("Selecao de imagem cancelada.");
             return;
         };
-        let bytes = match fs::read(&path) {
-            Ok(bytes) => bytes,
-            Err(error) => {
-                self.db_status = format!("Erro ao ler imagem: {error}");
-                return;
-            }
-        };
-        let reader = match ImageReader::new(std::io::Cursor::new(&bytes)).with_guessed_format() {
-            Ok(reader) => reader,
-            Err(error) => {
-                self.db_status =
-                    format!("Arquivo selecionado nao parece uma imagem suportada: {error}");
-                return;
-            }
-        };
-        if let Err(error) = reader.decode() {
-            self.db_status =
-                format!("Arquivo selecionado nao parece uma imagem suportada: {error}");
-            return;
-        }
         let Some((tecido_id, item_id, usa_estampas)) = self.selected_vinculo_keys() else {
             return;
         };
@@ -674,21 +703,92 @@ impl App {
             return;
         };
         let slot = self.vinculo_image_slot;
-        match self.db_runtime.block_on(db::update_vinculo_image(
-            pool,
-            tecido_id,
-            item_id,
-            usa_estampas,
-            slot.key(),
-            &bytes,
-        )) {
+        let pool = pool.clone();
+        let (tx, rx) = mpsc::channel();
+
+        self.vinculo_image_upload_started = Some(Instant::now());
+        self.vinculo_image_upload_rx = Some(rx);
+        self.db_status = format!("Salvando {}...", slot.title());
+
+        thread::spawn(move || {
+            let result =
+                save_vinculo_image_upload(pool, path, tecido_id, item_id, usa_estampas, slot);
+            let _ = tx.send(VinculoImageUploadResult {
+                tecido_id,
+                item_id,
+                usa_estampas,
+                slot,
+                result,
+            });
+        });
+    }
+
+    pub(super) fn drain_vinculo_image_upload(&mut self) {
+        let upload = self
+            .vinculo_image_upload_rx
+            .as_ref()
+            .and_then(|receiver| receiver.try_recv().ok());
+        let Some(upload) = upload else {
+            return;
+        };
+
+        self.vinculo_image_upload_started = None;
+        self.vinculo_image_upload_rx = None;
+
+        match upload.result {
             Ok(()) => {
-                self.load_vinculos(tecido_id);
+                self.vinculo_thumbnail_cache.remove(&(
+                    upload.tecido_id,
+                    upload.item_id,
+                    upload.usa_estampas,
+                    upload.slot,
+                ));
+                self.load_vinculos(upload.tecido_id);
                 self.load_vinculo_images();
-                self.db_status = format!("{} salva no vinculo.", slot.title());
+                self.advance_after_vinculo_image_upload();
+                self.db_status = format!("{} salva no vinculo.", upload.slot.title());
             }
-            Err(error) => self.db_status = format!("Erro ao salvar imagem no vinculo: {error}"),
+            Err(error) => self.db_status = error,
         }
+    }
+
+    fn advance_after_vinculo_image_upload(&mut self) {
+        if let Some(slot) = self.first_empty_vinculo_image_slot() {
+            self.vinculo_image_slot = slot;
+            self.refresh_vinculo_thumbnail();
+            return;
+        }
+
+        if self.advance_to_next_incomplete_vinculo() {
+            return;
+        }
+
+        self.vinculo_image_slot = VinculoImageSlot::Original;
+        self.refresh_vinculo_thumbnail();
+    }
+
+    fn advance_to_next_incomplete_vinculo(&mut self) -> bool {
+        if self.vinculos.is_empty() {
+            return false;
+        }
+
+        let start = self.vinculo_lista_option;
+        for offset in 1..=self.vinculos.len() {
+            let index = (start + offset) % self.vinculos.len();
+            if Self::vinculo_record_image_count(&self.vinculos[index]) < VinculoImageSlot::ALL.len()
+            {
+                self.vinculo_lista_option = index;
+                self.vinculo_image_slot = VinculoImageSlot::Original;
+                self.load_vinculo_images();
+                if let Some(slot) = self.first_empty_vinculo_image_slot() {
+                    self.vinculo_image_slot = slot;
+                    self.refresh_vinculo_thumbnail();
+                }
+                return true;
+            }
+        }
+
+        false
     }
 
     fn selected_vinculo_keys(&self) -> Option<(i64, i64, bool)> {
@@ -698,10 +798,19 @@ impl App {
     }
 
     fn refresh_vinculo_thumbnail(&mut self) {
-        self.vinculo_thumbnail = self
-            .vinculo_images
-            .imagem_original
-            .as_deref()
+        self.vinculo_thumbnail = None;
+        let Some((tecido_id, item_id, usa_estampas)) = self.selected_vinculo_keys() else {
+            return;
+        };
+        let cache_key = (tecido_id, item_id, usa_estampas, self.vinculo_image_slot);
+
+        if let Some(protocol) = self.vinculo_thumbnail_cache.get(&cache_key) {
+            self.vinculo_thumbnail = Some(protocol.clone());
+            return;
+        }
+
+        let Some(protocol) = self
+            .selected_vinculo_image_bytes()
             .and_then(|bytes| {
                 ImageReader::new(std::io::Cursor::new(bytes))
                     .with_guessed_format()
@@ -710,9 +819,149 @@ impl App {
                     .ok()
             })
             .and_then(|image| {
-                Picker::halfblocks()
-                    .new_protocol(image, Size::new(24, 10), Resize::Fit(None))
+                self.image_picker
+                    .new_protocol(
+                        image,
+                        Size::new(40, 16),
+                        Resize::Fit(Some(FilterType::Lanczos3)),
+                    )
                     .ok()
-            });
+            })
+        else {
+            return;
+        };
+
+        self.vinculo_thumbnail_cache
+            .insert(cache_key, protocol.clone());
+        self.vinculo_thumbnail = Some(protocol);
     }
+
+    fn selected_vinculo_image_bytes(&self) -> Option<&[u8]> {
+        match self.vinculo_image_slot {
+            VinculoImageSlot::Original => self.vinculo_images.imagem_original.as_deref(),
+            VinculoImageSlot::Brand => self.vinculo_images.imagem_brand.as_deref(),
+            VinculoImageSlot::Modelo => self.vinculo_images.imagem_modelo.as_deref(),
+            VinculoImageSlot::Alternativa => self.vinculo_images.imagem_alternativa.as_deref(),
+        }
+    }
+
+    fn first_empty_vinculo_image_slot(&self) -> Option<VinculoImageSlot> {
+        VinculoImageSlot::ALL
+            .iter()
+            .copied()
+            .find(|slot| !self.vinculo_images_has_slot(*slot))
+    }
+
+    fn vinculo_images_has_slot(&self, slot: VinculoImageSlot) -> bool {
+        match slot {
+            VinculoImageSlot::Original => self.vinculo_images.imagem_original.is_some(),
+            VinculoImageSlot::Brand => self.vinculo_images.imagem_brand.is_some(),
+            VinculoImageSlot::Modelo => self.vinculo_images.imagem_modelo.is_some(),
+            VinculoImageSlot::Alternativa => self.vinculo_images.imagem_alternativa.is_some(),
+        }
+    }
+
+    pub fn vinculo_current_image_count(&self) -> usize {
+        VinculoImageSlot::ALL
+            .iter()
+            .filter(|slot| self.vinculo_images_has_slot(**slot))
+            .count()
+    }
+
+    pub fn vinculo_record_image_count(vinculo: &VinculoRecord) -> usize {
+        [
+            vinculo.has_imagem_original,
+            vinculo.has_imagem_brand,
+            vinculo.has_imagem_modelo,
+            vinculo.has_imagem_alternativa,
+        ]
+        .into_iter()
+        .filter(|has_image| *has_image)
+        .count()
+    }
+}
+
+fn read_supported_image_bytes(path: &Path) -> Result<Vec<u8>, String> {
+    let mut last_error = String::new();
+
+    for attempt in 0..6 {
+        let bytes = fs::read(path).map_err(|error| format!("Erro ao ler imagem: {error}"))?;
+        let expected_len = fs::metadata(path).ok().map(|metadata| metadata.len());
+        if let Some(expected_len) = expected_len {
+            if expected_len > bytes.len() as u64 {
+                last_error = format!(
+                    "Arquivo selecionado ainda esta incompleto ({} de {} bytes, {}). Aguarde o Drive sincronizar e tente novamente.",
+                    bytes.len(),
+                    expected_len,
+                    path.display()
+                );
+                if attempt < 5 {
+                    thread::sleep(Duration::from_millis(350));
+                    continue;
+                }
+                break;
+            }
+        }
+
+        match decode_image_bytes(&bytes) {
+            Ok(_) => return Ok(bytes),
+            Err(error) => {
+                last_error = format!(
+                    "Arquivo selecionado nao parece uma imagem suportada ({} bytes, {}): {error}",
+                    bytes.len(),
+                    path.display()
+                );
+                if is_unexpected_eof(&error) && attempt < 5 {
+                    thread::sleep(Duration::from_millis(250));
+                    continue;
+                }
+                break;
+            }
+        }
+    }
+
+    Err(last_error)
+}
+
+fn decode_image_bytes(bytes: &[u8]) -> Result<DynamicImage, ImageError> {
+    ImageReader::new(std::io::Cursor::new(bytes))
+        .with_guessed_format()?
+        .decode()
+}
+
+fn is_unexpected_eof(error: &ImageError) -> bool {
+    matches!(
+        error,
+        ImageError::IoError(io_error) if io_error.kind() == std::io::ErrorKind::UnexpectedEof
+    ) || error.to_string().contains("unexpected end of file")
+}
+
+fn save_vinculo_image_upload(
+    pool: PgPool,
+    path: std::path::PathBuf,
+    tecido_id: i64,
+    item_id: i64,
+    usa_estampas: bool,
+    slot: VinculoImageSlot,
+) -> Result<(), String> {
+    let bytes = read_supported_image_bytes(&path)?;
+    if bytes.is_empty() {
+        return Err(format!(
+            "Arquivo selecionado esta vazio: {}",
+            path.display()
+        ));
+    }
+
+    let runtime = tokio::runtime::Runtime::new()
+        .map_err(|error| format!("Erro ao preparar upload da imagem: {error}"))?;
+    runtime
+        .block_on(db::update_vinculo_image(
+            &pool,
+            tecido_id,
+            item_id,
+            usa_estampas,
+            slot.key(),
+            &bytes,
+        ))
+        .map_err(|error| format!("Erro ao salvar imagem no vinculo: {error}"))
 }

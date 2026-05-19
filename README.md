@@ -81,7 +81,26 @@ Na lista de vinculos, `Enter` abre o detalhe do vinculo selecionado. Cada vincul
 - `Imagem Modelo`
 - `Imagem Alternativa`
 
-No detalhe do vinculo, selecione o slot com `Cima/Baixo` e pressione `Enter` para abrir a janela nativa do Windows e escolher a imagem no computador. A `Imagem Original` e renderizada como thumbnail no terminal via `ratatui-image` quando o terminal/backend permitir; caso contrario o sistema mantém a imagem salva e informa que nao conseguiu gerar preview.
+Na lista de vinculos, cada item mostra o progresso de imagens no formato `[n/4]`. No detalhe do vinculo, o painel do agente/chat fica oculto para dar mais area ao cadastro de imagens.
+
+Atalhos do detalhe do vinculo:
+
+- `1`: selecionar `Imagem Original`
+- `2`: selecionar `Imagem Brand`
+- `3`: selecionar `Imagem Modelo`
+- `4`: selecionar `Imagem Alternativa`
+- `Cima/Baixo`: alternar slot
+- `Tab`: proximo vinculo
+- `Shift+Tab`: vinculo anterior
+- `Enter`: abrir a janela nativa do Windows e escolher a imagem no computador
+
+Depois de salvar uma imagem, o sistema avanca automaticamente para o proximo slot vazio. Quando o vinculo atual fica completo, avanca para o proximo vinculo com imagens pendentes. O detalhe mostra o progresso no titulo (`Imagens n/4`) e o thumbnail do slot selecionado.
+
+O preview usa `ratatui-image` com deteccao automatica de protocolo do terminal (`Sixel`, `Kitty`, `iTerm2` ou fallback `Halfblocks`). O protocolo ativo aparece no rodape do detalhe. Para forcar um protocolo, defina `RAZAI_IMAGE_PROTOCOL=auto|sixel|kitty|iterm2|halfblocks` antes de iniciar o app.
+
+Durante o upload, a janela nativa de selecao de arquivo e modal; depois que a imagem e escolhida, o salvamento roda em segundo plano e o painel mostra `Salvando imagem...`. Thumbnails ja gerados ficam em cache de memoria por vinculo/slot e sao invalidados quando uma nova imagem e salva naquele slot.
+
+Arquivos em Google Drive/Drives compartilhados podem estar apenas parcialmente sincronizados. Se o app detectar leitura incompleta ou erro `unexpected end of file`, marque o arquivo/pasta como disponivel off-line, aguarde a sincronizacao terminar, ou copie/baixe a imagem para um disco local antes do upload.
 
 ## Vendas
 

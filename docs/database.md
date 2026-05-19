@@ -45,12 +45,14 @@ As tabelas `tecido_cores` e `tecido_estampas` possuem quatro colunas `BYTEA` par
 
 | Coluna | Uso |
 | --- | --- |
-| `imagem_original` | Foto principal/original do vinculo, usada para thumbnail no TUI. |
+| `imagem_original` | Foto principal/original do vinculo. |
 | `imagem_brand` | Imagem de marca/branding. |
 | `imagem_modelo` | Imagem com modelo. |
 | `imagem_alternativa` | Imagem alternativa/complementar. |
 
 Ao salvar novamente a lista de vinculos de um tecido, os registros mantidos preservam essas imagens; apenas os vinculos desmarcados sao removidos.
+
+O TUI pode renderizar thumbnail de qualquer um dos quatro slots no detalhe do vinculo. As imagens continuam armazenadas como bytes originais no banco; cache, redimensionamento e protocolo de terminal sao apenas estado de exibicao em memoria.
 
 ## Configuracoes
 
