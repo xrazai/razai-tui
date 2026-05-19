@@ -69,10 +69,15 @@ pub(super) fn render_cadastrar_cor(
         if nearby.is_empty() {
             lines.push(Line::from("Nenhuma cor proxima abaixo do limiar."));
         } else {
-            lines.push(Line::from(Span::styled(
-                "Cor bloqueada: proximidade abaixo do limiar.",
-                Style::default().fg(Color::Red),
-            )));
+            if let Some(closest) = nearby.first() {
+                lines.push(Line::from(Span::styled(
+                    format!(
+                        "Conflito mais proximo: {} (Delta E {:.2})",
+                        closest.nome, closest.delta_e
+                    ),
+                    Style::default().fg(Color::Red),
+                )));
+            }
             for color in nearby.iter().take(6) {
                 lines.push(Line::from(vec![
                     color_swatch(&color.hex),
