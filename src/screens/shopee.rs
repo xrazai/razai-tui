@@ -124,69 +124,87 @@ fn render_stock_groups(
     selected_cursor: usize,
 ) {
     let mut cursor = 0usize;
-    let rows = groups
-        .iter()
-        .flat_map(|parent| {
-            let parent_cursor = cursor;
-            cursor += 1;
-            let current = parent_cursor == selected_cursor;
-            let marker = if parent.expanded { "[-]" } else { "[+]" };
-            let parent_line = Line::from(vec![
-                Span::styled(if current { "> " } else { "  " }, selected_style(current)),
-                Span::styled(marker, Style::default().fg(Color::Cyan)),
-                Span::raw(" "),
-                Span::styled(parent.sku.clone(), Style::default().fg(Color::Yellow)),
-                Span::raw(format!(
-                    " | {} variacoes | atual {} | {}",
-                    parent.groups.len(),
-                    parent.total_current_stock,
-                    parent.name
-                )),
-            ]);
-            let mut lines = vec![parent_line];
-            if parent.expanded {
-                for group in &parent.groups {
-                    let child_cursor = cursor;
-                    cursor += 1;
-                    let current = child_cursor == selected_cursor;
-                    let warning = group
-                        .warning
-                        .as_deref()
-                        .map(|warning| format!(" | {warning}"))
-                        .unwrap_or_default();
-                    lines.push(Line::from(vec![
-                        Span::styled(if current { "> " } else { "  " }, selected_style(current)),
-                        Span::raw("    "),
-                        Span::styled(group.sku.clone(), Style::default().fg(Color::Green)),
-                        Span::raw(format!(
-                            " | {} ocorr. | atual {} | {}{}",
-                            group.occurrences.len(),
-                            group.total_current_stock,
-                            group.target_label(),
-                            warning
-                        )),
-                    ]));
-                    if let Some(occurrence) = group.occurrences.first() {
-                        lines.push(Line::from(format!(
-                            "       Ex: item {} model {} | seller {} disp {} res {}",
-                            occurrence.item_id,
-                            occurrence.model_id,
-                            occurrence.seller_stock,
-                            occurrence.available_stock,
-                            occurrence.reserved_stock
-                        )));
-                    }
+    let mut row_index = 0usize;
+    let mut selected_row = 0usize;
+    let mut rows = Vec::new();
+    for parent in groups {
+        let parent_cursor = cursor;
+        cursor += 1;
+        let current = parent_cursor == selected_cursor;
+        if current {
+            selected_row = row_index;
+        }
+        let marker = if parent.expanded { "[-]" } else { "[+]" };
+        rows.push(Line::from(vec![
+            Span::styled(if current { "> " } else { "  " }, selected_style(current)),
+            Span::styled(marker, Style::default().fg(Color::Cyan)),
+            Span::raw(" "),
+            Span::styled(parent.sku.clone(), Style::default().fg(Color::Yellow)),
+            Span::raw(format!(
+                " | {} variacoes | atual {} | {}",
+                parent.groups.len(),
+                parent.total_current_stock,
+                parent.name
+            )),
+        ]));
+        row_index += 1;
+        if parent.expanded {
+            for group in &parent.groups {
+                let child_cursor = cursor;
+                cursor += 1;
+                let current = child_cursor == selected_cursor;
+                if current {
+                    selected_row = row_index;
+                }
+                let warning = group
+                    .warning
+                    .as_deref()
+                    .map(|warning| format!(" | {warning}"))
+                    .unwrap_or_default();
+                rows.push(Line::from(vec![
+                    Span::styled(if current { "> " } else { "  " }, selected_style(current)),
+                    Span::raw("    "),
+                    Span::styled(group.sku.clone(), Style::default().fg(Color::Green)),
+                    Span::raw(format!(
+                        " | {} ocorr. | atual {} | {}{}",
+                        group.occurrences.len(),
+                        group.total_current_stock,
+                        group.target_label(),
+                        warning
+                    )),
+                ]));
+                row_index += 1;
+                if let Some(occurrence) = group.occurrences.first() {
+                    rows.push(Line::from(format!(
+                        "       Ex: item {} model {} | seller {} disp {} res {}",
+                        occurrence.item_id,
+                        occurrence.model_id,
+                        occurrence.seller_stock,
+                        occurrence.available_stock,
+                        occurrence.reserved_stock
+                    )));
+                    row_index += 1;
                 }
             }
-            lines
-        })
-        .collect::<Vec<_>>();
+        }
+    }
+    let visible_rows = area.height.saturating_sub(2).max(1) as usize;
+    let scroll_offset = selected_row
+        .saturating_add(1)
+        .saturating_sub(visible_rows)
+        .min(rows.len().saturating_sub(visible_rows));
+    let title = format!(
+        "Shopee > Estoque Online | Enter expande/sync | Space 0/100 | R recarregar | {}/{}",
+        selected_cursor.saturating_add(1).min(cursor.max(1)),
+        cursor.max(1)
+    );
     let widget = Paragraph::new(Text::from(rows))
         .block(
             Block::default()
-                .title("Shopee > Estoque Online | Enter expande/sync | Space 0/100 | R recarregar")
+                .title(title)
                 .borders(Borders::ALL),
         )
+        .scroll((scroll_offset as u16, 0))
         .wrap(Wrap { trim: false });
     frame.render_widget(widget, area);
 }
