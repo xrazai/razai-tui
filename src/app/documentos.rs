@@ -1,4 +1,4 @@
-use std::{fs, panic, path::PathBuf};
+use std::{fs, panic, path::Path, path::PathBuf, process::Command};
 
 use crossterm::event::KeyCode;
 
@@ -131,9 +131,16 @@ impl App {
 
         match write_result.and_then(|result| result) {
             Ok(()) => {
-                self.db_status = format!("Checklist gerado em {}", path.display());
-                self.checklist_active = false;
-                self.checklist_cursor = 0;
+                self.db_status = match abrir_pdf_checklist(&path) {
+                    Ok(()) => format!(
+                        "Checklist gerado e aberto para impressao: {}",
+                        path.display()
+                    ),
+                    Err(error) => format!(
+                        "Checklist gerado em {}. Falha ao abrir automaticamente: {error}",
+                        path.display()
+                    ),
+                };
             }
             Err(error) => self.db_status = format!("Erro ao gerar checklist: {error}"),
         }
@@ -147,4 +154,15 @@ fn checklist_pdf_path() -> Result<PathBuf, String> {
         "razai_checklist_{}.pdf",
         chrono::Local::now().format("%Y%m%d_%H%M%S")
     )))
+}
+
+fn abrir_pdf_checklist(path: &Path) -> Result<(), String> {
+    let path = path
+        .canonicalize()
+        .map_err(|error| format!("nao foi possivel localizar o PDF: {error}"))?;
+    Command::new("explorer")
+        .arg(path)
+        .spawn()
+        .map_err(|error| format!("nao foi possivel abrir o PDF: {error}"))?;
+    Ok(())
 }
