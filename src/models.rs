@@ -700,6 +700,54 @@ pub fn nearby_colors(
     matches
 }
 
+pub fn closest_color_conflicts(cores: &[CorRecord], threshold: f64) -> Vec<Option<ColorDistance>> {
+    let labs = cores
+        .iter()
+        .map(|cor| {
+            cor.codigo_hex
+                .as_deref()
+                .and_then(parse_hex_color)
+                .map(rgb_to_lab)
+        })
+        .collect::<Vec<_>>();
+    let mut conflicts = vec![None; cores.len()];
+
+    for left_index in 0..cores.len() {
+        let Some(left_lab) = labs[left_index] else {
+            continue;
+        };
+        for right_index in (left_index + 1)..cores.len() {
+            let Some(right_lab) = labs[right_index] else {
+                continue;
+            };
+            let delta_e = ciede2000(left_lab, right_lab);
+            if delta_e < threshold {
+                update_closest_conflict(&mut conflicts[left_index], &cores[right_index], delta_e);
+                update_closest_conflict(&mut conflicts[right_index], &cores[left_index], delta_e);
+            }
+        }
+    }
+
+    conflicts
+}
+
+fn update_closest_conflict(current: &mut Option<ColorDistance>, color: &CorRecord, delta_e: f64) {
+    if current
+        .as_ref()
+        .is_some_and(|existing| existing.delta_e <= delta_e)
+    {
+        return;
+    }
+    if let Some(hex) = &color.codigo_hex {
+        *current = Some(ColorDistance {
+            nome: color.nome.clone(),
+            sku: color.sku.clone(),
+            hex: hex.clone(),
+            delta_e,
+        });
+    }
+}
+
 fn rgb_to_lab((red, green, blue): (u8, u8, u8)) -> (f64, f64, f64) {
     fn linearize(value: u8) -> f64 {
         let value = f64::from(value) / 255.0;
@@ -776,9 +824,8 @@ pub fn ciede2000(lab1: (f64, f64, f64), lab2: (f64, f64, f64)) -> f64 {
     let delta_theta = 30.0 * (-((h_bar_prime - 275.0) / 25.0).powi(2)).exp();
     let c_bar_prime7 = c_bar_prime.powi(7);
     let r_c = 2.0 * (c_bar_prime7 / (c_bar_prime7 + 25_f64.powi(7))).sqrt();
-    let s_l = 1.0
-        + (0.015 * (l_bar_prime - 50.0).powi(2))
-            / (20.0 + (l_bar_prime - 50.0).powi(2)).sqrt();
+    let s_l =
+        1.0 + (0.015 * (l_bar_prime - 50.0).powi(2)) / (20.0 + (l_bar_prime - 50.0).powi(2)).sqrt();
     let s_c = 1.0 + 0.045 * c_bar_prime;
     let s_h = 1.0 + 0.015 * c_bar_prime * t;
     let r_t = -degrees_to_radians(2.0 * delta_theta).sin() * r_c;

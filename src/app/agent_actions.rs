@@ -78,8 +78,8 @@ impl App {
             self.chat
                 .messages
                 .push(crate::models::ChatMessage::assistant(format!(
-                "{description}\n\nResponda 'sim' para confirmar ou 'nao' para cancelar."
-            )));
+                    "{description}\n\nResponda 'sim' para confirmar ou 'nao' para cancelar."
+                )));
             return;
         }
         if self.submit_context_agent_message(message) {
@@ -197,14 +197,14 @@ impl App {
                 if let Some(index) = self.printers.iter().position(|item| item == &printer) {
                     self.printer_option = index;
                     self.selected_printer = Some(printer.clone());
-                    if let Some(pool) = &self.db_pool {
-                        if let Err(error) = self.db_runtime.block_on(db::set_config(
+                    if let Some(pool) = &self.db_pool
+                        && let Err(error) = self.db_runtime.block_on(db::set_config(
                             pool,
                             "receipt_printer",
                             &printer,
-                        )) {
-                            return format!("Erro ao salvar impressora: {error}");
-                        }
+                        ))
+                    {
+                        return format!("Erro ao salvar impressora: {error}");
                     }
                     format!("Impressora selecionada: {printer}.")
                 } else {
@@ -236,13 +236,12 @@ impl App {
             ..CorForm::default()
         };
         let sku = form.sku(&self.cores, None);
-        if let Some(pool) = &self.db_pool {
-            if let Err(error) = self
+        if let Some(pool) = &self.db_pool
+            && let Err(error) = self
                 .db_runtime
                 .block_on(db::insert_cor(pool, nome, &sku, hex))
-            {
-                return format!("Erro ao cadastrar cor: {error}");
-            }
+        {
+            return format!("Erro ao cadastrar cor: {error}");
         }
         self.reload_cores();
         format!("Cor cadastrada: {nome} ({sku}).")
@@ -254,18 +253,18 @@ impl App {
             ..EstampaForm::default()
         };
         let sku = form.sku(&self.estampas, None);
-        if let Some(pool) = &self.db_pool {
-            if let Err(error) = self
+        if let Some(pool) = &self.db_pool
+            && let Err(error) = self
                 .db_runtime
                 .block_on(db::insert_estampa(pool, nome, &sku))
-            {
-                return format!("Erro ao cadastrar estampa: {error}");
-            }
+        {
+            return format!("Erro ao cadastrar estampa: {error}");
         }
         self.reload_estampas();
         format!("Estampa cadastrada: {nome} ({sku}).")
     }
 
+    #[allow(clippy::too_many_arguments)]
     fn agent_create_tecido(
         &mut self,
         nome: &str,
@@ -294,13 +293,12 @@ impl App {
             );
         }
         let sku = form.sku(&self.tecidos, None);
-        if let Some(pool) = &self.db_pool {
-            if let Err(error) = self
+        if let Some(pool) = &self.db_pool
+            && let Err(error) = self
                 .db_runtime
                 .block_on(db::insert_tecido(pool, &form, &sku))
-            {
-                return format!("Erro ao cadastrar tecido: {error}");
-            }
+        {
+            return format!("Erro ao cadastrar tecido: {error}");
         }
         self.reload_tecidos();
         format!("Tecido cadastrado: {nome} ({sku}).")
@@ -464,7 +462,8 @@ fn parse_agent_action(message: &str) -> Option<AgentAction> {
     if normalized.contains("impressora")
         && (normalized.contains("selecion") || normalized.contains("configur"))
     {
-        let printer = value_after(message, "impressora").or_else(|| value_after(message, "printer"))?;
+        let printer =
+            value_after(message, "impressora").or_else(|| value_after(message, "printer"))?;
         return Some(AgentAction::SelectPrinter { printer });
     }
     None
@@ -567,7 +566,8 @@ fn draft_from_context(app: &App, message: &str) -> Option<AgentDraft> {
     if normalized.contains("cor")
         || matches!(
             (app.section, app.dados_screen, app.dados_option),
-            (Section::Dados, DadosScreen::CadastrarCor, _) | (Section::Dados, _, DadosOption::Cores)
+            (Section::Dados, DadosScreen::CadastrarCor, _)
+                | (Section::Dados, _, DadosOption::Cores)
         )
     {
         let hex = extract_hex(message);
@@ -608,7 +608,11 @@ fn draft_from_context(app: &App, message: &str) -> Option<AgentDraft> {
         || matches!(
             (app.section, app.dados_screen, app.dados_option),
             (Section::Dados, DadosScreen::VinculosMenu, _)
-                | (Section::Dados, DadosScreen::VinculosSelecionarTecidoCriar, _)
+                | (
+                    Section::Dados,
+                    DadosScreen::VinculosSelecionarTecidoCriar,
+                    _
+                )
                 | (Section::Dados, DadosScreen::VinculosSelecionarCores, _)
                 | (Section::Dados, _, DadosOption::Vinculos)
         )
@@ -688,7 +692,6 @@ fn merge_draft_from_message(draft: &mut AgentDraft, message: &str) {
             if tipo.is_none() {
                 *tipo = infer_tipo(message);
             }
-            return;
         }
         AgentDraft::CreateCor { nome, hex } => {
             if nome.is_none() {
@@ -713,7 +716,6 @@ fn merge_draft_from_message(draft: &mut AgentDraft, message: &str) {
                     .or_else(|| value_after(message, "estampa"))
                     .or_else(|| value_after(message, "nome"))
                     .or_else(|| free_answer(message));
-                return;
             }
         }
         AgentDraft::CreateVinculo { tecido, item } => {
@@ -727,13 +729,11 @@ fn merge_draft_from_message(draft: &mut AgentDraft, message: &str) {
             }
             if tecido.is_none() {
                 *tecido = value_after(message, "tecido").or_else(|| free_answer(message));
-                return;
             } else if item.is_none() {
                 *item = value_after(message, "item")
                     .or_else(|| value_after(message, "cor"))
                     .or_else(|| value_after(message, "estampa"))
                     .or_else(|| free_answer(message));
-                return;
             }
         }
         AgentDraft::SelectPrinter { printer } => {
@@ -741,7 +741,6 @@ fn merge_draft_from_message(draft: &mut AgentDraft, message: &str) {
                 *printer = value_after(message, "impressora")
                     .or_else(|| value_after(message, "printer"))
                     .or_else(|| free_answer(message));
-                return;
             }
         }
         AgentDraft::AddVendaItem {
@@ -794,7 +793,9 @@ fn draft_next_step(draft: &AgentDraft) -> DraftStep {
                 return DraftStep::Ask(String::from("Qual e o nome da cor?"));
             };
             let Some(hex) = clean_option(hex) else {
-                return DraftStep::Ask(format!("Qual e o hexadecimal da cor '{nome}'? Ex: #FF0000"));
+                return DraftStep::Ask(format!(
+                    "Qual e o hexadecimal da cor '{nome}'? Ex: #FF0000"
+                ));
             };
             if parse_hex_color(&hex).is_none() {
                 return DraftStep::Ask(String::from("Hex invalido. Envie no formato #RRGGBB."));
@@ -809,9 +810,7 @@ fn draft_next_step(draft: &AgentDraft) -> DraftStep {
         }
         AgentDraft::CreateVinculo { tecido, item } => {
             let Some(tecido) = clean_option(tecido) else {
-                return DraftStep::Ask(String::from(
-                    "Qual tecido deve receber o vinculo?",
-                ));
+                return DraftStep::Ask(String::from("Qual tecido deve receber o vinculo?"));
             };
             let Some(item) = clean_option(item) else {
                 return DraftStep::Ask(format!(
@@ -885,7 +884,9 @@ fn item_draft_next_step(
         return DraftStep::Ask(format!("Qual preco unitario para '{tecido} - {item}'?"));
     };
     if parse_number(&preco).filter(|value| *value > 0.0).is_none() {
-        return DraftStep::Ask(String::from("Preco invalido. Informe um valor maior que zero."));
+        return DraftStep::Ask(String::from(
+            "Preco invalido. Informe um valor maior que zero.",
+        ));
     }
     let Some(quantidade) = clean_option(quantidade) else {
         return DraftStep::Ask(format!("Qual quantidade para '{tecido} - {item}'?"));
@@ -997,12 +998,7 @@ fn format_money(value: f64) -> String {
     format!("{value:.2}").replace('.', ",")
 }
 
-fn build_venda_item(
-    tecido: &str,
-    item: &str,
-    preco: &str,
-    quantidade: &str,
-) -> Option<VendaItem> {
+fn build_venda_item(tecido: &str, item: &str, preco: &str, quantidade: &str) -> Option<VendaItem> {
     let preco_unitario = parse_number(preco).filter(|value| *value > 0.0)?;
     let quantidade = parse_number(quantidade).filter(|value| *value > 0.0)?;
     Some(VendaItem {
@@ -1106,7 +1102,7 @@ fn value_after(value: &str, marker: &str) -> Option<String> {
     let lower = value.to_lowercase();
     let index = lower.find(marker)? + marker.len();
     let tail = value[index..].trim_start_matches([':', ' ', '=']);
-    let end = tail.find(|ch| ch == ',' || ch == ';').unwrap_or(tail.len());
+    let end = tail.find([',', ';']).unwrap_or(tail.len());
     Some(tail[..end].trim().to_string()).filter(|item| !item.is_empty())
 }
 
@@ -1279,12 +1275,7 @@ mod tests {
         );
 
         assert!(app.handle_pending_agent_draft("1,50m rendimento 3"));
-        let confirmation = &app
-            .chat
-            .messages
-            .last()
-            .expect("confirmacao")
-            .text;
+        let confirmation = &app.chat.messages.last().expect("confirmacao").text;
         assert!(confirmation.contains("Calculo:"));
         assert!(confirmation.contains("333,33"));
         assert!(confirmation.contains("222,22"));
@@ -1318,7 +1309,10 @@ mod tests {
 
         assert_eq!(composicao, "100% Viscose");
         assert!((largura_m - 1.5).abs() < 0.001);
-        assert_eq!(rendimento_m_kg.map(|value| (value * 100.0).round() / 100.0), Some(3.0));
+        assert_eq!(
+            rendimento_m_kg.map(|value| (value * 100.0).round() / 100.0),
+            Some(3.0)
+        );
         assert_eq!(gramatura_linear_g_m, Some(330));
         assert_eq!(gramatura_g_m2, Some(220));
     }
@@ -1399,11 +1393,17 @@ mod tests {
         runtime
             .block_on(db::ensure_pedidos_tables(&pool))
             .expect("pedidos");
-        let tecidos = runtime.block_on(db::list_tecidos(&pool)).unwrap_or_default();
+        let tecidos = runtime
+            .block_on(db::list_tecidos(&pool))
+            .unwrap_or_default();
         let cores = runtime.block_on(db::list_cores(&pool)).unwrap_or_default();
-        let estampas = runtime.block_on(db::list_estampas(&pool)).unwrap_or_default();
+        let estampas = runtime
+            .block_on(db::list_estampas(&pool))
+            .unwrap_or_default();
         let vendas = runtime.block_on(db::list_vendas(&pool)).unwrap_or_default();
-        let pedidos = runtime.block_on(db::list_pedidos(&pool)).unwrap_or_default();
+        let pedidos = runtime
+            .block_on(db::list_pedidos(&pool))
+            .unwrap_or_default();
         let app = App::new(
             Some(pool.clone()),
             tecidos,
@@ -1535,7 +1535,10 @@ mod tests {
                     .fetch_one(pool),
             )
             .expect("cor no banco");
-        assert_eq!(row.get::<Option<String>, _>("codigo_hex").as_deref(), Some(hex));
+        assert_eq!(
+            row.get::<Option<String>, _>("codigo_hex").as_deref(),
+            Some(hex)
+        );
     }
 
     fn assert_db_estampa(app: &App, pool: &sqlx::PgPool, nome: &str) {

@@ -78,14 +78,13 @@ impl App {
         };
 
         if let Some(pool) = &self.db_pool {
-            if let Some(printer) = &selected_printer {
-                if let Err(error) =
+            if let Some(printer) = &selected_printer
+                && let Err(error) =
                     self.db_runtime
                         .block_on(db::set_config(pool, "receipt_printer", printer))
-                {
-                    self.db_status = format!("Erro ao salvar impressora: {error}");
-                    return;
-                }
+            {
+                self.db_status = format!("Erro ao salvar impressora: {error}");
+                return;
             }
             if let Err(error) = self.db_runtime.block_on(db::set_config(
                 pool,
@@ -119,7 +118,10 @@ pub(super) fn parse_delta_e_threshold(value: &str) -> Option<f64> {
 }
 
 fn format_delta_e_threshold(value: f64) -> String {
-    format!("{value:.2}").trim_end_matches('0').trim_end_matches('.').to_string()
+    format!("{value:.2}")
+        .trim_end_matches('0')
+        .trim_end_matches('.')
+        .to_string()
 }
 
 pub(super) fn list_installed_printers() -> Vec<String> {

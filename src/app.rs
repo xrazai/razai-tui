@@ -130,6 +130,7 @@ pub struct App {
 }
 
 impl App {
+    #[allow(clippy::too_many_arguments)]
     pub fn new(
         db_pool: Option<PgPool>,
         tecidos: Vec<TecidoRecord>,
@@ -257,12 +258,11 @@ impl App {
                 .saturating_sub(last_tick.elapsed())
                 .max(Duration::from_millis(10));
 
-            if event::poll(timeout)? {
-                if let Event::Key(key) = event::read()? {
-                    if key.kind == KeyEventKind::Press {
-                        self.handle_key(key);
-                    }
-                }
+            if event::poll(timeout)?
+                && let Event::Key(key) = event::read()?
+                && key.kind == KeyEventKind::Press
+            {
+                self.handle_key(key);
             }
 
             if last_tick.elapsed() >= Duration::from_millis(250) {
@@ -1081,7 +1081,10 @@ impl App {
 }
 
 fn format_delta_e_threshold(value: f64) -> String {
-    format!("{value:.2}").trim_end_matches('0').trim_end_matches('.').to_string()
+    format!("{value:.2}")
+        .trim_end_matches('0')
+        .trim_end_matches('.')
+        .to_string()
 }
 
 fn format_money(value: f64) -> String {

@@ -817,10 +817,10 @@ fn find_first_picture_in(path: &Path, depth: usize) -> Option<PathBuf> {
         if path.is_file() && is_supported_image(&path) {
             return Some(path);
         }
-        if path.is_dir() {
-            if let Some(found) = find_first_picture_in(&path, depth + 1) {
-                return Some(found);
-            }
+        if path.is_dir()
+            && let Some(found) = find_first_picture_in(&path, depth + 1)
+        {
+            return Some(found);
         }
     }
     None
@@ -927,7 +927,7 @@ fn listing_colors(vinculos: &[VinculoRecord]) -> Result<Vec<String>, ShopeeError
 }
 
 fn listing_sizes(color_count: usize) -> Vec<ListingSize> {
-    let max_size_count = (100 / color_count.max(1)).min(20).max(1);
+    let max_size_count = (100 / color_count.max(1)).clamp(1, 20);
     let mut sizes = vec![ListingSize {
         label: String::from("0,5m"),
         meters: 0.5,
@@ -1169,10 +1169,9 @@ fn stock_child_sku(model: &Value, tier_one_options: &[String]) -> Option<String>
         .and_then(|indexes| indexes.first())
         .and_then(Value::as_u64)
         .and_then(|index| usize::try_from(index).ok())
+        && let Some(option) = tier_one_options.get(tier_index)
     {
-        if let Some(option) = tier_one_options.get(tier_index) {
-            return Some(option.clone());
-        }
+        return Some(option.clone());
     }
 
     stock_child_sku_from_model_sku(model.get("model_sku").and_then(Value::as_str)?)
@@ -1619,12 +1618,13 @@ fn percent_decode(value: &str) -> String {
     let bytes = value.as_bytes();
     let mut index = 0;
     while index < bytes.len() {
-        if bytes[index] == b'%' && index + 2 < bytes.len() {
-            if let Ok(hex) = u8::from_str_radix(&value[index + 1..index + 3], 16) {
-                output.push(hex);
-                index += 3;
-                continue;
-            }
+        if bytes[index] == b'%'
+            && index + 2 < bytes.len()
+            && let Ok(hex) = u8::from_str_radix(&value[index + 1..index + 3], 16)
+        {
+            output.push(hex);
+            index += 3;
+            continue;
         }
         output.push(if bytes[index] == b'+' {
             b' '
@@ -2060,12 +2060,8 @@ mod tests {
                 }
             ]
         });
-        let parents = group_stock_occurrences_by_parent(model_occurrences(
-            &item,
-            1,
-            "Anarruga",
-            &response,
-        ));
+        let parents =
+            group_stock_occurrences_by_parent(model_occurrences(&item, 1, "Anarruga", &response));
 
         assert_eq!(parents.len(), 1);
         assert_eq!(parents[0].groups.len(), 1);

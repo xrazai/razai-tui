@@ -95,15 +95,14 @@ pub(super) fn render_cadastrar_cor(
     } else {
         Vec::new()
     };
-    let sku = Paragraph::new(Text::from(vec![
-        Line::from(form.sku(cores, editing_id)),
-        Line::from(""),
-    ]
-    .into_iter()
-    .chain(proximity_lines)
-    .collect::<Vec<_>>()))
-        .block(Block::default().title("SKU").borders(Borders::ALL))
-        .style(Style::default().fg(Color::White));
+    let sku = Paragraph::new(Text::from(
+        vec![Line::from(form.sku(cores, editing_id)), Line::from("")]
+            .into_iter()
+            .chain(proximity_lines)
+            .collect::<Vec<_>>(),
+    ))
+    .block(Block::default().title("SKU").borders(Borders::ALL))
+    .style(Style::default().fg(Color::White));
 
     frame.render_widget(form_widget, chunks[0]);
     frame.render_widget(sku, chunks[1]);
@@ -461,7 +460,7 @@ pub(super) fn format_estampa_action(
     ])
 }
 
-pub(super) fn format_submit(selected: TecidoField, valid: bool, editing: bool) -> Line<'static> {
+pub(super) fn format_submit(selected: TecidoField, valid: bool, _editing: bool) -> Line<'static> {
     let marker = if selected == TecidoField::Salvar {
         ">"
     } else {
@@ -478,11 +477,7 @@ pub(super) fn format_submit(selected: TecidoField, valid: bool, editing: bool) -
             format!("{marker} "),
             selected_style(selected == TecidoField::Salvar),
         ),
-        Span::raw(if editing {
-            "[Confirmar]"
-        } else {
-            "[Confirmar]"
-        }),
+        Span::raw("[Confirmar]"),
         Span::raw(status),
     ])
 }
