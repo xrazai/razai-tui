@@ -4,6 +4,7 @@ use std::{
     io::{Read, Write},
     net::{TcpListener, TcpStream},
     path::Path,
+    sync::atomic::{AtomicBool, Ordering},
     thread,
     time::{Duration, SystemTime, UNIX_EPOCH},
 };
@@ -25,6 +26,7 @@ const ACCESS_TOKEN_EXPIRES_AT_KEY: &str = "shopee_access_token_expires_at";
 const REFRESH_TOKEN_EXPIRES_AT_KEY: &str = "shopee_refresh_token_expires_at";
 const REFRESH_WINDOW_SECONDS: i64 = 10 * 60;
 const REFRESH_TOKEN_TTL_SECONDS: i64 = 30 * 24 * 60 * 60;
+static CALLBACK_LISTENER_STARTED: AtomicBool = AtomicBool::new(false);
 
 #[derive(Clone)]
 pub struct ShopeeConfig {
@@ -133,9 +135,15 @@ pub fn start_callback_listener(pool: Option<PgPool>) -> Result<String, ShopeeErr
         .ok()
         .filter(|value| !value.trim().is_empty())
         .unwrap_or_else(|| String::from("127.0.0.1:8910"));
+    let auth_url = authorization_url(&config);
+    if CALLBACK_LISTENER_STARTED.load(Ordering::SeqCst) {
+        return Ok(format!(
+            "Callback Shopee ja ativo em http://{addr}. Push URL: /shopee/push. Redirect OAuth: /shopee/callback. Abra: {auth_url}"
+        ));
+    }
     let listener = TcpListener::bind(&addr)
         .map_err(|error| ShopeeError::Http(format!("falha ao abrir callback local {addr}: {error}")))?;
-    let auth_url = authorization_url(&config);
+    CALLBACK_LISTENER_STARTED.store(true, Ordering::SeqCst);
 
     thread::spawn(move || {
         for mut stream in listener.incoming().flatten() {
@@ -155,7 +163,7 @@ pub fn start_callback_listener(pool: Option<PgPool>) -> Result<String, ShopeeErr
     });
 
     Ok(format!(
-        "Callback local ativo em http://{addr}. Push URL: /shopee/push. Redirect OAuth: /shopee/callback. Abra: {auth_url}"
+        "Callback Shopee ativo em http://{addr}. Push URL: /shopee/push. Redirect OAuth: /shopee/callback. Abra: {auth_url}"
     ))
 }
 
@@ -347,7 +355,11 @@ async fn persist_tokens(pool: Option<&PgPool>, tokens: &ShopeeTokens) -> Result<
 
 fn update_dotenv(tokens: &ShopeeTokens) -> Result<(), String> {
     let path = Path::new(".env");
-    let original = fs::read_to_string(path).map_err(|error| format!("Falha ao ler .env: {error}"))?;
+    let original = if path.exists() {
+        fs::read_to_string(path).map_err(|error| format!("Falha ao ler .env: {error}"))?
+    } else {
+        String::new()
+    };
     let access_expires_at = tokens.access_token_expires_at.to_string();
     let refresh_expires_at = tokens.refresh_token_expires_at.to_string();
     let updated = update_env_contents(

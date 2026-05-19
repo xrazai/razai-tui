@@ -8,7 +8,7 @@ use ratatui::{
 pub fn render(frame: &mut Frame, area: Rect, selected: usize, status: &str) {
     let chunks = Layout::default()
         .direction(Direction::Vertical)
-        .constraints([Constraint::Min(5), Constraint::Length(5)])
+        .constraints([Constraint::Min(5), Constraint::Length(7)])
         .split(area);
     let items = ["Criar anuncio", "Estoque Online"]
         .iter()

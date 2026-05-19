@@ -528,7 +528,7 @@ impl App {
                 let reply = match shopee::start_callback_listener(self.db_pool.clone()) {
                     Ok(status) => {
                         self.shopee_status = status.clone();
-                        self.db_status = String::from("Shopee aguardando callback local");
+                        self.db_status = String::from("Callback Shopee ativo");
                         status
                     }
                     Err(error) => format!("Shopee: falha ao iniciar callback local: {error}"),
