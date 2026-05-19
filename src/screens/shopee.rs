@@ -26,18 +26,6 @@ pub fn render(
         .direction(Direction::Vertical)
         .constraints([Constraint::Min(5), Constraint::Length(7)])
         .split(area);
-    let items = ["Criar anuncio", "Estoque Online", "Guia Shopee BR"]
-        .iter()
-        .enumerate()
-        .map(|(index, item)| ListItem::new(format!("{}. {}", index + 1, item)));
-    let mut state = ListState::default().with_selected(Some(selected));
-    let list = List::new(items)
-        .block(Block::default().title("Shopee").borders(Borders::ALL))
-        .highlight_symbol("> ")
-        .highlight_style(Style::default().fg(Color::Black).bg(Color::Cyan).bold());
-
-    frame.render_stateful_widget(list, chunks[0], &mut state);
-
     if selected == 0 && listing_active {
         render_listing_form(
             frame,
@@ -49,6 +37,18 @@ pub fn render(
         );
     } else if selected == 1 && !stock_groups.is_empty() {
         render_stock_groups(frame, chunks[0], stock_groups, stock_cursor);
+    } else {
+        let items = ["Criar anuncio", "Estoque Online", "Guia Shopee BR"]
+            .iter()
+            .enumerate()
+            .map(|(index, item)| ListItem::new(format!("{}. {}", index + 1, item)));
+        let mut state = ListState::default().with_selected(Some(selected));
+        let list = List::new(items)
+            .block(Block::default().title("Shopee").borders(Borders::ALL))
+            .highlight_symbol("> ")
+            .highlight_style(Style::default().fg(Color::Black).bg(Color::Cyan).bold());
+
+        frame.render_stateful_widget(list, chunks[0], &mut state);
     }
 
     let status_text = if stock_confirm {
