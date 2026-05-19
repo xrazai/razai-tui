@@ -1066,13 +1066,14 @@ fn model_occurrences(
     else {
         return Vec::new();
     };
+    let tier_one_options = stock_tier_one_options(response);
     response
         .get("model")
         .and_then(Value::as_array)
         .into_iter()
         .flatten()
         .filter_map(|model| {
-            let sku = normalize_sku(model.get("model_sku").and_then(Value::as_str)?)?;
+            let sku = stock_child_sku(model, &tier_one_options)?;
             let model_id = model.get("model_id").and_then(Value::as_i64)?;
             let stock = model_stock(model);
             Some(ShopeeStockOccurrence {
@@ -1142,6 +1143,60 @@ fn stock_from_stock_info(stock_info: &Value) -> (i64, i64, i64, Option<String>, 
 fn normalize_sku(value: &str) -> Option<String> {
     let sku = value.trim().to_ascii_uppercase();
     (!sku.is_empty()).then_some(sku)
+}
+
+fn stock_tier_one_options(response: &Value) -> Vec<String> {
+    response
+        .get("tier_variation")
+        .and_then(Value::as_array)
+        .and_then(|tiers| tiers.first())
+        .and_then(|tier| tier.get("option_list"))
+        .and_then(Value::as_array)
+        .map(|options| {
+            options
+                .iter()
+                .filter_map(|option| option.get("option").and_then(Value::as_str))
+                .filter_map(normalize_sku)
+                .collect::<Vec<_>>()
+        })
+        .unwrap_or_default()
+}
+
+fn stock_child_sku(model: &Value, tier_one_options: &[String]) -> Option<String> {
+    if let Some(tier_index) = model
+        .get("tier_index")
+        .and_then(Value::as_array)
+        .and_then(|indexes| indexes.first())
+        .and_then(Value::as_u64)
+        .and_then(|index| usize::try_from(index).ok())
+    {
+        if let Some(option) = tier_one_options.get(tier_index) {
+            return Some(option.clone());
+        }
+    }
+
+    stock_child_sku_from_model_sku(model.get("model_sku").and_then(Value::as_str)?)
+}
+
+fn stock_child_sku_from_model_sku(value: &str) -> Option<String> {
+    let sku = normalize_sku(value)?;
+    let Some((maybe_size, color_sku)) = sku.split_once('-') else {
+        return Some(sku);
+    };
+    if is_size_sku_part(maybe_size) {
+        normalize_sku(color_sku)
+    } else {
+        Some(sku)
+    }
+}
+
+fn is_size_sku_part(value: &str) -> bool {
+    let size = value.trim_end_matches('M');
+    let has_digit = size.chars().any(|char| char.is_ascii_digit());
+    has_digit
+        && size
+            .chars()
+            .all(|char| char.is_ascii_digit() || char == ',' || char == '.')
 }
 
 pub fn group_stock_occurrences(occurrences: Vec<ShopeeStockOccurrence>) -> Vec<ShopeeStockGroup> {
@@ -1929,6 +1984,94 @@ mod tests {
         assert_eq!(parents[0].sku, "ANAR");
         assert_eq!(parents[0].groups.len(), 2);
         assert_eq!(parents[0].total_current_stock, 5);
+    }
+
+    #[test]
+    fn stock_child_sku_uses_tier_one_option_first() {
+        let tier_one_options = vec![String::from("BORDO"), String::from("CAFE")];
+        let model = json!({
+            "tier_index": [1, 0],
+            "model_sku": "050-BORDO"
+        });
+
+        assert_eq!(
+            stock_child_sku(&model, &tier_one_options).as_deref(),
+            Some("CAFE")
+        );
+    }
+
+    #[test]
+    fn stock_child_sku_falls_back_to_model_sku_size_prefix() {
+        let tier_one_options = Vec::new();
+        let model = json!({
+            "model_sku": "050-BORDO"
+        });
+
+        assert_eq!(
+            stock_child_sku(&model, &tier_one_options).as_deref(),
+            Some("BORDO")
+        );
+    }
+
+    #[test]
+    fn stock_child_sku_from_model_sku_ignores_size_prefix() {
+        assert_eq!(
+            stock_child_sku_from_model_sku("050-BORDO").as_deref(),
+            Some("BORDO")
+        );
+        assert_eq!(
+            stock_child_sku_from_model_sku("1M-BORDO").as_deref(),
+            Some("BORDO")
+        );
+        assert_eq!(
+            stock_child_sku_from_model_sku("0,5M-BORDO").as_deref(),
+            Some("BORDO")
+        );
+        assert_eq!(
+            stock_child_sku_from_model_sku("0.5M-BORDO").as_deref(),
+            Some("BORDO")
+        );
+        assert_eq!(
+            stock_child_sku_from_model_sku("ANAR-BORDO").as_deref(),
+            Some("ANAR-BORDO")
+        );
+    }
+
+    #[test]
+    fn groups_stock_by_color_when_model_sku_has_size_prefix() {
+        let item = json!({"item_sku": "ANAR"});
+        let response = json!({
+            "tier_variation": [
+                {"name": "Cor", "option_list": [{"option": "Bordo"}]},
+                {"name": "Tamanho", "option_list": [{"option": "0,5m"}, {"option": "1m"}]}
+            ],
+            "model": [
+                {
+                    "tier_index": [0, 0],
+                    "model_sku": "050-BORDO",
+                    "model_id": 10,
+                    "stock_info_v2": {"seller_stock": [{"stock": 2}]}
+                },
+                {
+                    "tier_index": [0, 1],
+                    "model_sku": "1M-BORDO",
+                    "model_id": 11,
+                    "stock_info_v2": {"seller_stock": [{"stock": 3}]}
+                }
+            ]
+        });
+        let parents = group_stock_occurrences_by_parent(model_occurrences(
+            &item,
+            1,
+            "Anarruga",
+            &response,
+        ));
+
+        assert_eq!(parents.len(), 1);
+        assert_eq!(parents[0].groups.len(), 1);
+        assert_eq!(parents[0].groups[0].sku, "BORDO");
+        assert_eq!(parents[0].groups[0].occurrences.len(), 2);
+        assert_eq!(parents[0].groups[0].total_current_stock, 5);
     }
 
     #[test]
