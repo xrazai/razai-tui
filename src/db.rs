@@ -1,6 +1,8 @@
 use sqlx::{PgPool, Row, postgres::PgPoolOptions};
 
+mod orders;
 mod sales;
+pub use orders::*;
 pub use sales::*;
 
 use crate::models::{
@@ -109,6 +111,46 @@ pub async fn ensure_vendas_tables(pool: &PgPool) -> Result<(), sqlx::Error> {
         .execute(pool)
         .await?;
     sqlx::query("CREATE INDEX IF NOT EXISTS idx_vendas_created_at ON vendas(created_at DESC)")
+        .execute(pool)
+        .await?;
+
+    Ok(())
+}
+
+pub async fn ensure_pedidos_tables(pool: &PgPool) -> Result<(), sqlx::Error> {
+    sqlx::query(
+        r#"
+        CREATE TABLE IF NOT EXISTS pedidos (
+            id BIGSERIAL PRIMARY KEY,
+            total NUMERIC(12, 2) NOT NULL,
+            status TEXT NOT NULL DEFAULT 'pendente',
+            pdf_path TEXT,
+            created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+        )
+        "#,
+    )
+    .execute(pool)
+    .await?;
+
+    sqlx::query(
+        r#"
+        CREATE TABLE IF NOT EXISTS pedido_itens (
+            id BIGSERIAL PRIMARY KEY,
+            pedido_id BIGINT NOT NULL REFERENCES pedidos(id) ON DELETE CASCADE,
+            descricao TEXT NOT NULL,
+            quantidade NUMERIC(12, 3) NOT NULL,
+            preco_unitario NUMERIC(12, 2) NOT NULL,
+            subtotal NUMERIC(12, 2) NOT NULL
+        )
+        "#,
+    )
+    .execute(pool)
+    .await?;
+
+    sqlx::query("CREATE INDEX IF NOT EXISTS idx_pedido_itens_pedido_id ON pedido_itens(pedido_id)")
+        .execute(pool)
+        .await?;
+    sqlx::query("CREATE INDEX IF NOT EXISTS idx_pedidos_created_at ON pedidos(created_at DESC)")
         .execute(pool)
         .await?;
 

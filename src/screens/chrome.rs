@@ -49,7 +49,7 @@ pub fn render_chat(
     area: Rect,
     chat: &ChatState,
     focus: Focus,
-    skill: &agent::SkillContext,
+    context: &agent::AgentContext,
 ) {
     let border_style = Style::default().fg(Color::White);
     let selected_border_style = if focus == Focus::Chat {
@@ -66,14 +66,17 @@ pub fn render_chat(
         ])
         .split(area);
 
-    let skill_panel = Paragraph::new(format!("Skill: {}\n{}", skill.name, skill.description))
+    let agent_panel = Paragraph::new(format!(
+        "Razai Master\nContexto: {}",
+        context.capability
+    ))
         .block(
             Block::default()
                 .title("Agente")
                 .borders(Borders::ALL)
                 .border_style(selected_border_style),
         );
-    frame.render_widget(skill_panel, chunks[0]);
+    frame.render_widget(agent_panel, chunks[0]);
 
     let history = if chat.messages.is_empty() {
         String::from("Tab foca o chat. Enter envia.")
@@ -95,8 +98,13 @@ pub fn render_chat(
     );
     frame.render_widget(messages, chunks[1]);
 
+    let input_text = if chat.waiting && chat.input.is_empty() {
+        String::from("Consultando agente...")
+    } else {
+        chat.input.clone()
+    };
     let input = Paragraph::new(Span::styled(
-        chat.input.clone(),
+        input_text,
         Style::default().fg(Color::Yellow),
     ))
     .block(

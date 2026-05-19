@@ -22,15 +22,20 @@ Para hot reload durante desenvolvimento:
 cargo watch -x run
 ```
 
-## Configuracao
+## Configuracao local
 
-Use `.env` para variaveis locais:
+Copie o arquivo de exemplo e preencha apenas o que for necessario:
 
-```env
-DATABASE_URL=postgres://razai:razai_dev@localhost:5432/razai_tui
-OPENROUTER_API_KEY=...
-OPENROUTER_MODEL=anthropic/claude-sonnet-4.5
+```powershell
+Copy-Item .env.example .env
 ```
+
+Notas:
+
+- `.env` fica fora do Git e deve guardar valores locais/sensiveis.
+- `DATABASE_URL` ja vem configurada no `.env.example` para o Postgres do `docker-compose.yml`.
+- `OPENROUTER_API_KEY` e opcional; sem ela o chat usa respostas locais limitadas.
+- Nunca coloque chaves reais, tokens ou senhas pessoais no README ou em arquivos versionados.
 
 ## Navegacao
 
@@ -47,9 +52,10 @@ OPENROUTER_MODEL=anthropic/claude-sonnet-4.5
 
 - `Dashboard`: agente mestre para consultas e acoes com confirmacao.
 - `Vendas`: nova venda, historico, edicao e exclusao.
-- `Pedidos`: reservado para acompanhamento de pedidos.
+- `Pedidos`: novo pedido, historico, PDF, compartilhamento nativo do Windows e aprovacao para virar venda.
 - `Dados`: cadastros e vinculos.
 - `Estoque`: reservado para estoque.
+- `Shopee`: reservado para rotinas da Shopee.
 - `Configuracoes`: impressora de recibos.
 
 ## Dados
@@ -83,9 +89,19 @@ O `Resumo do pedido` aparece apenas na tela de lancamento, inclusive quando uma 
 
 No `Historico de Vendas`, o periodo padrao e o dia atual. Ajuste `Data inicio` e `Data fim` no formato `AAAA-MM-DD` e pressione `Enter` para recarregar. Na lista, `Enter` abre a venda selecionada para edicao. A tela de edicao permite salvar alteracoes, salvar e imprimir, cancelar ou excluir com confirmacao.
 
+## Pedidos
+
+Pedidos usam o mesmo fluxo de lancamento de vendas, mas geram uma pendencia em vez de uma venda imediata:
+
+1. Selecionar tecido e vinculo.
+2. Informar preco unitario e quantidade.
+3. Gerar pedido.
+4. O sistema salva o pedido como `pendente`, gera um PDF em `pdf_pedidos/` e abre o compartilhamento nativo do Windows com o PDF anexado.
+5. Depois do pagamento, abra o pedido no historico e aprove para converter em venda.
+
 ## Agente IA
 
-O chat lateral usa OpenRouter quando `OPENROUTER_API_KEY` esta configurada. Cada tela expõe uma skill ativa para orientar o agente. No Dashboard, a skill `dashboard.master` consulta dados locais e prepara cadastros, vinculos, vendas, historico e configuracoes com confirmacao antes de gravar. Responda `sim` para confirmar uma acao pendente ou `nao` para cancelar. A matriz de skills fica em [docs/skills.md](docs/skills.md).
+O chat lateral usa OpenRouter quando `OPENROUTER_API_KEY` esta configurada. O app usa um agente unico, o Razai Master, com capacidades para tecidos, cores, estampas, vinculos, vendas, pedidos, configuracoes, estoque e Shopee. A tela atual apenas define o contexto inicial do atendimento. Responda `sim` para confirmar uma acao pendente ou `nao` para cancelar. A matriz de capacidades fica em [docs/skills.md](docs/skills.md).
 
 ## Arquitetura
 
@@ -97,4 +113,4 @@ A organizacao atual evita arquivos grandes quando for possivel dividir:
 - `src/screens/`: renderizacao de telas.
 - `src/models.rs` e `src/models/`: estado de formularios, enums e regras de SKU.
 - `src/db.rs` e `src/db/`: acesso ao Postgres.
-- `src/agent.rs`: skills e chamada OpenRouter.
+- `src/agent.rs`: contexto do Razai Master e chamada OpenRouter.

@@ -16,13 +16,13 @@ docker compose up -d
 docker compose down
 ```
 
-## URL local
+## Variaveis locais
 
-Copie `.env.example` para `.env`.
+Copie `.env.example` para `.env` e mantenha o `.env` fora do Git.
 
-```env
-DATABASE_URL=postgres://razai:razai_dev@localhost:5432/razai_tui
-```
+O valor de `DATABASE_URL` no exemplo aponta para o Postgres local criado pelo `docker-compose.yml`. Se voce trocar usuario, senha, porta ou nome do banco no Docker, atualize tambem o `.env` local.
+
+Nao documente chaves reais de API ou senhas pessoais no README, docs ou commits. `OPENROUTER_API_KEY` deve existir apenas no `.env` local.
 
 ## Dados
 

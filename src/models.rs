@@ -4,7 +4,7 @@ pub use sku::{build_estampa_vinculo_sku, build_vinculo_sku};
 use crate::db::{CorRecord, EstampaRecord, TecidoRecord};
 
 mod core;
-pub use core::{AgentAction, ChatMessage, ChatState, Focus};
+pub use core::{AgentAction, AgentDraft, ChatMessage, ChatState, Focus, PedidosScreen};
 
 #[derive(Clone, Copy, Default, Eq, PartialEq)]
 pub enum VendasScreen {
@@ -55,6 +55,7 @@ impl VendaField {
     }
 }
 
+#[derive(Clone)]
 pub struct VendaItem {
     pub descricao: String,
     pub quantidade: f64,
@@ -602,16 +603,18 @@ pub enum Section {
     Pedidos,
     Dados,
     Estoque,
+    Shopee,
     Configuracoes,
 }
 
 impl Section {
-    pub const ALL: [Section; 6] = [
+    pub const ALL: [Section; 7] = [
         Section::Dashboard,
         Section::Vendas,
         Section::Pedidos,
         Section::Dados,
         Section::Estoque,
+        Section::Shopee,
         Section::Configuracoes,
     ];
 
@@ -622,6 +625,7 @@ impl Section {
             Section::Pedidos => "Pedidos",
             Section::Dados => "Dados",
             Section::Estoque => "Estoque",
+            Section::Shopee => "Shopee",
             Section::Configuracoes => "Configuracoes",
         }
     }

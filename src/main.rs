@@ -24,6 +24,7 @@ fn main() -> io::Result<()> {
         let _ = db_runtime.block_on(db::ensure_configuracoes_table(pool));
         let _ = db_runtime.block_on(db::ensure_estampas_tables(pool));
         let _ = db_runtime.block_on(db::ensure_vendas_tables(pool));
+        let _ = db_runtime.block_on(db::ensure_pedidos_tables(pool));
     }
     let tecidos = match &pool {
         Some(pool) => db_runtime
@@ -56,6 +57,12 @@ fn main() -> io::Result<()> {
             .unwrap_or_default(),
         None => Vec::new(),
     };
+    let pedidos_historico = match &pool {
+        Some(pool) => db_runtime
+            .block_on(db::list_pedidos(pool))
+            .unwrap_or_default(),
+        None => Vec::new(),
+    };
 
     let mut terminal = setup_terminal()?;
     let app_result = App::new(
@@ -65,6 +72,7 @@ fn main() -> io::Result<()> {
         estampas,
         selected_printer,
         vendas_historico,
+        pedidos_historico,
         db_runtime,
     )
     .run(&mut terminal);

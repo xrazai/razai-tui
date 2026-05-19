@@ -1,4 +1,9 @@
-use std::{time::Duration, time::Instant};
+use std::{
+    sync::mpsc::{self, Receiver},
+    thread,
+    time::Duration,
+    time::Instant,
+};
 
 use crossterm::event::{self, Event, KeyCode, KeyEvent, KeyEventKind, KeyModifiers};
 use ratatui::{
@@ -11,7 +16,10 @@ use tokio::runtime::Runtime;
 
 use crate::{
     agent,
-    db::{self, CorRecord, EstampaRecord, TecidoRecord, VendaHistoricoRecord, VinculoRecord},
+    db::{
+        self, CorRecord, EstampaRecord, PedidoRecord, TecidoRecord, VendaHistoricoRecord,
+        VinculoRecord,
+    },
     models::*,
     screens,
     ui::SIDE_PANEL_WIDTH,
@@ -20,6 +28,7 @@ use crate::{
 mod agent_actions;
 mod configuracoes;
 mod dados;
+mod pedidos;
 mod vendas;
 
 use std::io;
@@ -52,6 +61,8 @@ pub struct App {
     pub db_status: String,
     pub focus: Focus,
     pub chat: ChatState,
+    pub chat_reply_rx: Option<Receiver<String>>,
+    pub pending_agent_draft: Option<AgentDraft>,
     pub pending_agent_action: Option<AgentAction>,
     pub vendas_screen: VendasScreen,
     pub venda_menu_option: usize,
@@ -77,6 +88,24 @@ pub struct App {
     pub finalizar_venda_option: FinalizarVendaOption,
     pub pending_delete_venda: bool,
     pub pending_delete_venda_item: bool,
+    pub pedidos_screen: PedidosScreen,
+    pub pedido_menu_option: usize,
+    pub pedido_tecido_option: usize,
+    pub pedido_vinculo_option: usize,
+    pub pedido_field: VendaField,
+    pub pedido_dropdown: Option<VendaField>,
+    pub pedido_preco: String,
+    pub pedido_quantidade: String,
+    pub pedido_vinculos: Vec<VinculoRecord>,
+    pub pedido_itens: Vec<VendaItem>,
+    pub pedido_resumo_focus: bool,
+    pub pedido_item_option: usize,
+    pub pedidos_historico: Vec<PedidoRecord>,
+    pub pedido_historico_option: usize,
+    pub editing_pedido_id: Option<i64>,
+    pub finalizar_pedido_dialog: bool,
+    pub finalizar_pedido_option: FinalizarVendaOption,
+    pub pending_approve_pedido: bool,
     pub printers: Vec<String>,
     pub printer_option: usize,
     pub selected_printer: Option<String>,
@@ -91,6 +120,7 @@ impl App {
         estampas: Vec<EstampaRecord>,
         selected_printer: Option<String>,
         vendas_historico: Vec<VendaHistoricoRecord>,
+        pedidos_historico: Vec<PedidoRecord>,
         db_runtime: Runtime,
     ) -> Self {
         let printers = configuracoes::list_installed_printers();
@@ -133,6 +163,8 @@ impl App {
             db_runtime,
             focus: Focus::System,
             chat: ChatState::default(),
+            chat_reply_rx: None,
+            pending_agent_draft: None,
             pending_agent_action: None,
             vendas_screen: VendasScreen::default(),
             venda_menu_option: 0,
@@ -158,6 +190,24 @@ impl App {
             finalizar_venda_option: FinalizarVendaOption::default(),
             pending_delete_venda: false,
             pending_delete_venda_item: false,
+            pedidos_screen: PedidosScreen::default(),
+            pedido_menu_option: 0,
+            pedido_tecido_option: 0,
+            pedido_vinculo_option: 0,
+            pedido_field: VendaField::default(),
+            pedido_dropdown: None,
+            pedido_preco: String::new(),
+            pedido_quantidade: String::new(),
+            pedido_vinculos: Vec::new(),
+            pedido_itens: Vec::new(),
+            pedido_resumo_focus: false,
+            pedido_item_option: 0,
+            pedidos_historico,
+            pedido_historico_option: 0,
+            editing_pedido_id: None,
+            finalizar_pedido_dialog: false,
+            finalizar_pedido_option: FinalizarVendaOption::default(),
+            pending_approve_pedido: false,
             printers,
             printer_option,
             selected_printer,
@@ -170,6 +220,7 @@ impl App {
         let mut last_tick = Instant::now();
 
         while self.running {
+            self.drain_chat_reply();
             terminal.draw(|frame| self.render(frame))?;
 
             let timeout = Duration::from_millis(250)
@@ -190,6 +241,18 @@ impl App {
         }
 
         Ok(())
+    }
+
+    fn drain_chat_reply(&mut self) {
+        let reply = self
+            .chat_reply_rx
+            .as_ref()
+            .and_then(|receiver| receiver.try_recv().ok());
+        if let Some(reply) = reply {
+            self.chat.waiting = false;
+            self.chat_reply_rx = None;
+            self.chat.messages.push(ChatMessage::assistant(reply));
+        }
     }
 
     fn handle_key(&mut self, key: KeyEvent) {
@@ -224,6 +287,10 @@ impl App {
             self.handle_vendas_key(key.code);
             return;
         }
+        if self.section == Section::Pedidos {
+            self.handle_pedidos_key(key.code);
+            return;
+        }
         if self.section == Section::Configuracoes {
             self.handle_configuracoes_key(key.code);
             return;
@@ -237,7 +304,8 @@ impl App {
             KeyCode::Char('3') => self.section = Section::Pedidos,
             KeyCode::Char('4') => self.section = Section::Dados,
             KeyCode::Char('5') => self.section = Section::Estoque,
-            KeyCode::Char('6') => self.section = Section::Configuracoes,
+            KeyCode::Char('6') => self.section = Section::Shopee,
+            KeyCode::Char('7') => self.section = Section::Configuracoes,
             KeyCode::Backspace if self.section == Section::Dados => {}
             KeyCode::Up if self.section == Section::Dados => match self.dados_screen {
                 DadosScreen::Menu => self.dados_option = self.dados_option.previous(),
@@ -368,6 +436,24 @@ impl App {
             return;
         }
 
+        if self.section == Section::Pedidos && self.pedidos_screen == PedidosScreen::Lancamento {
+            if key == KeyCode::BackTab {
+                if self.pedido_resumo_focus {
+                    self.pedido_resumo_focus = false;
+                } else {
+                    self.focus = Focus::Chat;
+                }
+            } else if self.pedido_resumo_focus {
+                self.focus = Focus::Chat;
+                self.pedido_resumo_focus = false;
+            } else if self.pedido_itens.is_empty() {
+                self.focus = Focus::Chat;
+            } else {
+                self.pedido_resumo_focus = true;
+            }
+            return;
+        }
+
         self.focus = match key {
             KeyCode::BackTab => self.focus.previous(),
             _ => self.focus.next(),
@@ -375,6 +461,13 @@ impl App {
     }
 
     fn submit_chat(&mut self) {
+        if self.chat.waiting {
+            self.chat.messages.push(ChatMessage::assistant(String::from(
+                "Ainda estou processando a mensagem anterior.",
+            )));
+            return;
+        }
+
         let message = self.chat.input.trim().to_string();
         if message.is_empty() {
             return;
@@ -387,24 +480,154 @@ impl App {
             return;
         }
 
-        if self.section == Section::Dashboard {
-            let reply = self.submit_dashboard_agent_message(&message);
-            self.chat.messages.push(ChatMessage::assistant(reply));
+        if self.handle_pending_agent_draft(&message) {
             return;
         }
 
-        let skill = self.active_skill();
-        let reply = self
-            .db_runtime
-            .block_on(agent::openrouter_reply(&skill, &message, &self.tecido_form))
-            .unwrap_or_else(|error| {
+        if self.section == Section::Dashboard {
+            self.submit_dashboard_agent_message(&message);
+            return;
+        }
+
+        if self.submit_context_agent_message(&message) {
+            return;
+        }
+
+        let context_info = self.active_context();
+        let context = self.agent_context();
+        let fallback = agent::local_reply(&context_info, &message, &self.tecido_form);
+        self.spawn_agent_reply(context_info, message, context, fallback);
+    }
+
+    pub(super) fn spawn_agent_reply(
+        &mut self,
+        context_info: agent::AgentContext,
+        message: String,
+        context: String,
+        fallback: String,
+    ) {
+        let (sender, receiver) = mpsc::channel();
+        self.chat.waiting = true;
+        self.chat_reply_rx = Some(receiver);
+        thread::spawn(move || {
+            let reply = match Runtime::new() {
+                Ok(runtime) => runtime
+                    .block_on(agent::openrouter_reply_with_context(
+                        &context_info,
+                        &message,
+                        &context,
+                    ))
+                    .unwrap_or_else(|error| format!("{error}\n\n{fallback}")),
+                Err(error) => format!("Erro ao iniciar runtime do agente: {error}\n\n{fallback}"),
+            };
+            let _ = sender.send(reply);
+        });
+    }
+
+    pub(super) fn agent_context(&self) -> String {
+        let tecidos = self
+            .tecidos
+            .iter()
+            .take(12)
+            .map(|tecido| {
                 format!(
-                    "{}\n\n{}",
-                    error,
-                    agent::local_reply(&skill, &message, &self.tecido_form)
+                    "{} [{}] tipo={} largura={:.2}m",
+                    tecido.nome, tecido.sku, tecido.tipo, tecido.largura_m
                 )
-            });
-        self.chat.messages.push(ChatMessage::assistant(reply));
+            })
+            .collect::<Vec<_>>()
+            .join("; ");
+        let cores = self
+            .cores
+            .iter()
+            .take(12)
+            .map(|cor| {
+                format!(
+                    "{} [{}] {}",
+                    cor.nome,
+                    cor.sku.as_deref().unwrap_or("sem SKU"),
+                    cor.codigo_hex.as_deref().unwrap_or("")
+                )
+            })
+            .collect::<Vec<_>>()
+            .join("; ");
+        let estampas = self
+            .estampas
+            .iter()
+            .take(12)
+            .map(|estampa| {
+                format!(
+                    "{} [{}]",
+                    estampa.nome,
+                    estampa.sku.as_deref().unwrap_or("sem SKU")
+                )
+            })
+            .collect::<Vec<_>>()
+            .join("; ");
+        let vendas = self
+            .vendas_historico
+            .iter()
+            .take(8)
+            .map(|venda| {
+                format!(
+                    "#{} {} {} itens R${}",
+                    venda.id,
+                    venda.created_at,
+                    venda.itens,
+                    format_money(venda.total)
+                )
+            })
+            .collect::<Vec<_>>()
+            .join("; ");
+        let pedidos = self
+            .pedidos_historico
+            .iter()
+            .take(8)
+            .map(|pedido| {
+                format!(
+                    "#{} {} {} {} itens R${}",
+                    pedido.id,
+                    pedido.created_at,
+                    pedido.status,
+                    pedido.itens,
+                    format_money(pedido.total)
+                )
+            })
+            .collect::<Vec<_>>()
+            .join("; ");
+        let venda_total = self.venda_itens.iter().map(VendaItem::total).sum::<f64>();
+        let pedido_total = self.pedido_itens.iter().map(VendaItem::total).sum::<f64>();
+
+        format!(
+            "Projeto Razai TUI: sistema terminal para loja de tecidos com Dashboard, Vendas, Pedidos, Dados, Estoque e Configuracoes. Tela atual: {}. Status: {}. Dados carregados: {} tecidos, {} cores, {} estampas, {} vendas no periodo {}..{}, {} pedidos. Tecidos: {}. Cores: {}. Estampas: {}. Vendas recentes: {}. Pedidos recentes: {}. Venda em andamento: {} itens, total R${}, preco='{}', quantidade='{}'. Pedido em andamento: {} itens, total R${}, preco='{}', quantidade='{}'. Impressora: {}. Formulario tecido: nome='{}', composicao='{}', largura='{}', tipo='{}'. Regras: gravacoes exigem confirmacao; vendas viram historico; pedidos geram PDF em pdf_pedidos e podem ser aprovados como venda.",
+            self.section.title(),
+            self.db_status,
+            self.tecidos.len(),
+            self.cores.len(),
+            self.estampas.len(),
+            self.vendas_historico.len(),
+            self.venda_historico_inicio,
+            self.venda_historico_fim,
+            self.pedidos_historico.len(),
+            empty_label(&tecidos),
+            empty_label(&cores),
+            empty_label(&estampas),
+            empty_label(&vendas),
+            empty_label(&pedidos),
+            self.venda_itens.len(),
+            format_money(venda_total),
+            self.venda_preco,
+            self.venda_quantidade,
+            self.pedido_itens.len(),
+            format_money(pedido_total),
+            self.pedido_preco,
+            self.pedido_quantidade,
+            self.selected_printer.as_deref().unwrap_or("nenhuma"),
+            self.tecido_form.nome,
+            self.tecido_form.composicao,
+            self.tecido_form.largura,
+            self.tecido_form.tipo.value(TIPO_OPTIONS)
+        )
     }
 
     fn render(&self, frame: &mut Frame) {
@@ -428,21 +651,40 @@ impl App {
 
         match self.section {
             Section::Vendas => screens::vendas::render(frame, body[0], self),
+            Section::Pedidos => screens::pedidos::render(frame, body[0], self),
             Section::Dados => screens::dados::render(frame, body[0], self),
             Section::Configuracoes => screens::configuracoes::render(frame, body[0], self),
             section => screens::chrome::render_content(frame, body[0], section),
         }
 
-        screens::chrome::render_chat(frame, body[1], &self.chat, self.focus, &self.active_skill());
+        screens::chrome::render_chat(
+            frame,
+            body[1],
+            &self.chat,
+            self.focus,
+            &self.active_context(),
+        );
         screens::chrome::render_footer(frame, outer[3], &self.db_status, self.focus);
     }
 
-    fn active_skill(&self) -> agent::SkillContext {
-        agent::active_skill(
+    fn active_context(&self) -> agent::AgentContext {
+        agent::active_context(
             self.section,
             self.dados_screen,
             self.dados_option,
             self.vendas_screen,
         )
+    }
+}
+
+fn format_money(value: f64) -> String {
+    format!("{value:.2}").replace('.', ",")
+}
+
+fn empty_label(value: &str) -> &str {
+    if value.trim().is_empty() {
+        "nenhum"
+    } else {
+        value
     }
 }
