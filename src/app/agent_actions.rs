@@ -1412,6 +1412,7 @@ mod tests {
             None,
             vendas,
             pedidos,
+            String::from("Shopee nao verificada nos testes"),
             runtime,
         );
         (app, pool)

@@ -7,6 +7,7 @@ mod app;
 mod db;
 mod models;
 mod screens;
+mod shopee;
 mod ui;
 use app::App;
 
@@ -63,6 +64,7 @@ fn main() -> io::Result<()> {
             .unwrap_or_default(),
         None => Vec::new(),
     };
+    let shopee_status = db_runtime.block_on(shopee::startup_status(pool.as_ref()));
 
     let mut terminal = setup_terminal()?;
     let app_result = App::new(
@@ -73,6 +75,7 @@ fn main() -> io::Result<()> {
         selected_printer,
         vendas_historico,
         pedidos_historico,
+        shopee_status,
         db_runtime,
     )
     .run(&mut terminal);
