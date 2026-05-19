@@ -524,6 +524,18 @@ impl App {
         }
 
         if self.section == Section::Shopee {
+            if wants_shopee_callback(&message) {
+                let reply = match shopee::start_callback_listener(self.db_pool.clone()) {
+                    Ok(status) => {
+                        self.shopee_status = status.clone();
+                        self.db_status = String::from("Shopee aguardando callback local");
+                        status
+                    }
+                    Err(error) => format!("Shopee: falha ao iniciar callback local: {error}"),
+                };
+                self.chat.messages.push(ChatMessage::assistant(reply));
+                return;
+            }
             if let Some(code) = parse_shopee_code(&message) {
                 let reply = match self
                     .db_runtime
@@ -767,4 +779,12 @@ fn parse_shopee_code(message: &str) -> Option<&str> {
 fn non_empty_code(code: &str) -> Option<&str> {
     let code = code.trim();
     (!code.is_empty()).then_some(code)
+}
+
+fn wants_shopee_callback(message: &str) -> bool {
+    let message = message.trim().to_ascii_lowercase();
+    matches!(
+        message.as_str(),
+        "conectar" | "conectar shopee" | "callback" | "iniciar callback" | "ngrok"
+    )
 }
