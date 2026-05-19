@@ -72,8 +72,8 @@ pub(super) fn render_cadastrar_cor(
             if let Some(closest) = nearby.first() {
                 lines.push(Line::from(Span::styled(
                     format!(
-                        "Conflito mais proximo: {} (Delta E {:.2})",
-                        closest.nome, closest.delta_e
+                        "Conflito: {} - {} - Delta E {:.2}",
+                        closest.nome, closest.hex, closest.delta_e
                     ),
                     Style::default().fg(Color::Red),
                 )));

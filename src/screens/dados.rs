@@ -159,8 +159,8 @@ fn render_cores(
             if let Some(conflict) = conflict {
                 spans.push(Span::styled(
                     format!(
-                        " * Conflito mais proximo: {} (Delta E {:.2})",
-                        conflict.nome, conflict.delta_e
+                        " * Conflito: {} - {} - Delta E {:.2}",
+                        conflict.nome, conflict.hex, conflict.delta_e
                     ),
                     Style::default().fg(Color::Red),
                 ));
