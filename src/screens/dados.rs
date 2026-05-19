@@ -35,6 +35,7 @@ pub fn render(frame: &mut Frame, area: Rect, app: &App) {
             &app.cor_form,
             &app.cores,
             app.editing_cor_id,
+            app.color_delta_e_threshold,
             app.pending_delete,
         ),
         DadosScreen::Estampas => render_estampas(frame, area, app.cor_option, &app.estampas),

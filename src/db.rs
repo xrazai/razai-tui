@@ -33,6 +33,16 @@ pub async fn ensure_configuracoes_table(pool: &PgPool) -> Result<(), sqlx::Error
     .execute(pool)
     .await?;
 
+    sqlx::query(
+        r#"
+        INSERT INTO configuracoes (chave, valor, updated_at)
+        VALUES ('color_delta_e_threshold', '3', NOW())
+        ON CONFLICT (chave) DO NOTHING
+        "#,
+    )
+    .execute(pool)
+    .await?;
+
     Ok(())
 }
 

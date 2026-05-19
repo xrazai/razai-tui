@@ -1410,6 +1410,7 @@ mod tests {
             cores,
             estampas,
             None,
+            3.0,
             vendas,
             pedidos,
             String::from("Shopee nao verificada nos testes"),

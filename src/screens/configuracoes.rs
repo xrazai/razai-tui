@@ -39,12 +39,28 @@ pub fn render(frame: &mut Frame, area: Rect, app: &App) {
     }
 
     items.push(ListItem::new(Line::from("")));
+    items.push(ListItem::new(Line::from(vec![
+        Span::styled(
+            if app.printer_option == app.printers.len() {
+                "> "
+            } else {
+                "  "
+            },
+            selected_style(app.printer_option == app.printers.len()),
+        ),
+        Span::raw("Limiar Delta E: "),
+        Span::styled(
+            app.color_delta_e_threshold_input.clone(),
+            Style::default().fg(Color::Yellow),
+        ),
+        Span::raw("  bloqueia cores mais proximas que este valor"),
+    ])));
     items.push(action_line(
-        app.printer_option == app.printers.len(),
+        app.printer_option == app.printers.len() + 1,
         "[Confirmar]",
     ));
     items.push(action_line(
-        app.printer_option == app.printers.len() + 1,
+        app.printer_option == app.printers.len() + 2,
         "[Voltar]",
     ));
 
@@ -52,7 +68,7 @@ pub fn render(frame: &mut Frame, area: Rect, app: &App) {
     let list = List::new(items)
         .block(
             Block::default()
-                .title("Configuracoes > Impressora de recibos 80mm")
+                .title("Configuracoes > Impressora e cores")
                 .borders(Borders::ALL),
         )
         .highlight_symbol("> ")
