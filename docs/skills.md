@@ -13,6 +13,7 @@ O chat lateral usa um unico agente: **Razai Master**. A tela atual define apenas
 | `dados.vinculos` | Criar e consultar vinculos entre tecido e cor/estampa. |
 | `vendas` | Lançar itens, consultar historico, filtrar periodo e abrir venda por id. |
 | `pedidos` | Lançar itens, gerar PDF, compartilhar pelo Windows e aprovar pedido como venda. |
+| `documentos` | Orientar a emissao de documentos operacionais, como checklist PDF de vinculos por tecido. |
 | `configuracoes` | Selecionar impressora de recibos. |
 | `estoque` | Consultar e movimentar estoque quando a tela for implementada. |
 | `shopee` | Apoiar conexao Shopee, estoque online por SKU, criacao de anuncio e requisitos BR. |
@@ -27,6 +28,7 @@ Acoes locais ja mapeadas:
 - criar vinculo tecido + cor/estampa;
 - lançar item de venda;
 - lançar item de pedido;
+- orientar emissao do checklist de vinculos em PDF;
 - abrir venda por id;
 - filtrar historico por periodo;
 - selecionar impressora.

@@ -15,6 +15,8 @@ O projeto e uma TUI em Rust com `ratatui`, banco local PostgreSQL e chat lateral
 | `src/app/vendas/receipt.rs` | Montagem e envio RAW/ESC-POS de recibos. |
 | `src/app/configuracoes.rs` | Eventos da aba Configuracoes e leitura de impressoras do Windows. |
 | `src/app/pedidos.rs` | Eventos da aba Pedidos, geracao de PDF e compartilhamento nativo do Windows. |
+| `src/app/documentos.rs` | Eventos da aba Documentos e geracao do checklist de vinculos. |
+| `src/app/documentos/pdf.rs` | Layout e escrita do PDF de checklist em `pdf_documentos/`. |
 | `src/shopee.rs` | Cliente Shopee, assinatura HMAC, OAuth/callback, refresh de tokens, estoque online e sync por SKU. |
 | `src/screens/chrome.rs` | Header, tabs, footer e chat. |
 | `src/screens/dados.rs` | Renderizacao de listas da aba Dados. |
@@ -22,6 +24,7 @@ O projeto e uma TUI em Rust com `ratatui`, banco local PostgreSQL e chat lateral
 | `src/screens/vendas.rs` | Renderizacao do fluxo de Vendas. |
 | `src/screens/configuracoes.rs` | Renderizacao da selecao de impressora. |
 | `src/screens/pedidos.rs` | Renderizacao do fluxo de Pedidos. |
+| `src/screens/documentos.rs` | Renderizacao do menu Documentos e selecao de tecidos para checklist. |
 | `src/screens/shopee.rs` | Renderizacao da aba Shopee, menu, grupos de estoque e status. |
 | `src/models.rs` | Enums, formularios e regras de calculo. |
 | `src/models/sku.rs` | Geracao de SKUs. |
@@ -79,6 +82,12 @@ Vendas finalizadas sao persistidas em `vendas` e `venda_itens`. O historico inic
 ## Pedidos
 
 Pedidos ficam persistidos em `pedidos` e `pedido_itens` com status `pendente` ou `aprovado`. Ao gerar um pedido, o app salva os itens, cria um PDF em `pdf_pedidos/` e abre o compartilhamento nativo do Windows com o PDF anexado. Ao aprovar um pedido pago, os itens sao registrados em `vendas` e o pedido passa para `aprovado`.
+
+## Documentos
+
+A aba `Documentos` concentra documentos operacionais que nao alteram o banco. O fluxo `Imprimir Checklist` permite selecionar tecidos e gerar um PDF em `pdf_documentos/` com os vinculos cadastrados.
+
+O PDF e montado por `src/app/documentos/pdf.rs` com uma tabela por tecido selecionado. Cada tabela contem thumbnail da cor, tecido, nome da cor e checkbox de conferencia. Antes de desenhar uma tabela, o gerador calcula a altura necessaria e inicia nova pagina quando a tabela nao cabe no espaco restante, evitando cortes de pagina no meio de uma tabela sempre que possivel.
 
 ## Shopee
 

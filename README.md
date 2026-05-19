@@ -57,6 +57,7 @@ Notas:
 - `Dados`: cadastros e vinculos.
 - `Estoque`: reservado para estoque.
 - `Shopee`: conexao Shopee, criacao de anuncio, estoque online por SKU e guia BR.
+- `Documentos`: emissao de documentos operacionais, como checklist de vinculos em PDF.
 - `Configuracoes`: impressora de recibos.
 
 ## Dados
@@ -99,6 +100,23 @@ Pedidos usam o mesmo fluxo de lancamento de vendas, mas geram uma pendencia em v
 3. Gerar pedido.
 4. O sistema salva o pedido como `pendente`, gera um PDF em `pdf_pedidos/` e abre o compartilhamento nativo do Windows com o PDF anexado.
 5. Depois do pagamento, abra o pedido no historico e aprove para converter em venda.
+
+## Documentos
+
+A aba `Documentos` fica antes de `Configuracoes` e possui:
+
+1. `Imprimir Checklist`
+
+O checklist permite marcar um ou mais tecidos com `Space` e gerar o PDF com `Ctrl+Enter` ou pela opcao `[Gerar PDF]`. O arquivo e salvo em `pdf_documentos/`.
+
+O PDF separa uma tabela para cada tecido selecionado. Cada linha mostra:
+
+- thumbnail da cor com aproximadamente `1,5cm x 1,5cm`;
+- tecido;
+- nome da cor;
+- checkbox para conferencia manual.
+
+O gerador evita quebrar uma tabela entre paginas quando a tabela inteira ainda cabe em uma nova pagina. Tecidos sem vinculos tambem aparecem no PDF com uma linha informativa.
 
 ## Shopee
 
@@ -153,7 +171,7 @@ O fluxo de criacao seleciona um tecido local, usa a categoria `Roupas Femininas 
 
 ## Agente IA
 
-O chat lateral usa OpenRouter quando `OPENROUTER_API_KEY` esta configurada. O app usa um agente unico, o Razai Master, com capacidades para tecidos, cores, estampas, vinculos, vendas, pedidos, configuracoes, estoque e Shopee. A tela atual apenas define o contexto inicial do atendimento. Responda `sim` para confirmar uma acao pendente ou `nao` para cancelar. A matriz de capacidades fica em [docs/skills.md](docs/skills.md).
+O chat lateral usa OpenRouter quando `OPENROUTER_API_KEY` esta configurada. O app usa um agente unico, o Razai Master, com capacidades para tecidos, cores, estampas, vinculos, vendas, pedidos, documentos, configuracoes, estoque e Shopee. A tela atual apenas define o contexto inicial do atendimento. Responda `sim` para confirmar uma acao pendente ou `nao` para cancelar. A matriz de capacidades fica em [docs/skills.md](docs/skills.md).
 
 ## Arquitetura
 
