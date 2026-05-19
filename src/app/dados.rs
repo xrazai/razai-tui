@@ -226,10 +226,13 @@ impl App {
             self.pending_delete = false;
             return;
         };
+        let Some(pool) = &self.db_pool else {
+            self.db_status = String::from("Banco local indisponivel para excluir tecido");
+            self.pending_delete = false;
+            return;
+        };
 
-        if let Some(pool) = &self.db_pool
-            && let Err(error) = self.db_runtime.block_on(db::delete_tecido(pool, id))
-        {
+        if let Err(error) = self.db_runtime.block_on(db::delete_tecido(pool, id)) {
             self.db_status = format!("Erro ao excluir no banco: {error}");
             self.pending_delete = false;
             return;
@@ -331,9 +334,13 @@ impl App {
             self.pending_delete = false;
             return;
         };
-        if let Some(pool) = &self.db_pool
-            && let Err(error) = self.db_runtime.block_on(db::delete_cor(pool, id))
-        {
+        let Some(pool) = &self.db_pool else {
+            self.db_status = String::from("Banco local indisponivel para excluir cor");
+            self.pending_delete = false;
+            return;
+        };
+
+        if let Err(error) = self.db_runtime.block_on(db::delete_cor(pool, id)) {
             self.db_status = format!("Erro ao excluir cor: {error}");
             self.pending_delete = false;
             return;
@@ -412,9 +419,13 @@ impl App {
             self.pending_delete = false;
             return;
         };
-        if let Some(pool) = &self.db_pool
-            && let Err(error) = self.db_runtime.block_on(db::delete_estampa(pool, id))
-        {
+        let Some(pool) = &self.db_pool else {
+            self.db_status = String::from("Banco local indisponivel para excluir estampa");
+            self.pending_delete = false;
+            return;
+        };
+
+        if let Err(error) = self.db_runtime.block_on(db::delete_estampa(pool, id)) {
             self.db_status = format!("Erro ao excluir estampa: {error}");
             self.pending_delete = false;
             return;

@@ -514,6 +514,24 @@ impl App {
         if self.venda_item_option < self.venda_itens.len() {
             let removed_index = self.venda_item_option;
             self.venda_itens.remove(removed_index);
+
+            if let Some(venda_id) = self.editing_venda_id {
+                let Some(pool) = &self.db_pool else {
+                    self.db_status = String::from("Banco local indisponivel para salvar exclusao");
+                    self.pending_delete_venda_item = false;
+                    return;
+                };
+                if let Err(error) =
+                    self.db_runtime
+                        .block_on(db::update_venda(pool, venda_id, &self.venda_itens))
+                {
+                    self.db_status = format!("Erro ao salvar exclusao: {error}");
+                    self.pending_delete_venda_item = false;
+                    return;
+                }
+                self.reload_vendas_historico();
+            }
+
             self.venda_item_option = self
                 .venda_item_option
                 .min(self.venda_itens.len().saturating_sub(1));
@@ -521,7 +539,11 @@ impl App {
                 self.reset_venda_item_editing();
             }
             self.venda_resumo_focus = !self.venda_itens.is_empty();
-            self.db_status = format!("Lancamento {} excluido", removed_index + 1);
+            self.db_status = if self.editing_venda_id.is_some() {
+                format!("Lancamento {} excluido e salvo", removed_index + 1)
+            } else {
+                format!("Lancamento {} excluido", removed_index + 1)
+            };
         }
         self.pending_delete_venda_item = false;
     }

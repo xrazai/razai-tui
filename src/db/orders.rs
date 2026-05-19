@@ -93,6 +93,30 @@ pub async fn list_pedido_itens(
         .collect())
 }
 
+pub async fn update_pedido_itens(
+    pool: &PgPool,
+    pedido_id: i64,
+    itens: &[VendaItem],
+) -> Result<(), sqlx::Error> {
+    let total = itens.iter().map(VendaItem::total).sum::<f64>();
+    let mut transaction = pool.begin().await?;
+
+    sqlx::query("UPDATE pedidos SET total = $1::numeric, pdf_path = NULL WHERE id = $2")
+        .bind(total)
+        .bind(pedido_id)
+        .execute(&mut *transaction)
+        .await?;
+
+    sqlx::query("DELETE FROM pedido_itens WHERE pedido_id = $1")
+        .bind(pedido_id)
+        .execute(&mut *transaction)
+        .await?;
+
+    insert_pedido_itens(&mut transaction, pedido_id, itens).await?;
+    transaction.commit().await?;
+    Ok(())
+}
+
 pub async fn approve_pedido(pool: &PgPool, pedido_id: i64) -> Result<(), sqlx::Error> {
     let itens = list_pedido_itens(pool, pedido_id).await?;
     crate::db::insert_venda(pool, &itens).await?;
