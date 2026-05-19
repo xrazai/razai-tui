@@ -124,6 +124,8 @@ pub struct App {
     pub printers: Vec<String>,
     pub printer_option: usize,
     pub selected_printer: Option<String>,
+    pub color_delta_e_threshold: f64,
+    pub color_delta_e_threshold_input: String,
     pub running: bool,
 }
 
@@ -134,6 +136,7 @@ impl App {
         cores: Vec<CorRecord>,
         estampas: Vec<EstampaRecord>,
         selected_printer: Option<String>,
+        color_delta_e_threshold: f64,
         vendas_historico: Vec<VendaHistoricoRecord>,
         pedidos_historico: Vec<PedidoRecord>,
         shopee_status: String,
@@ -236,6 +239,8 @@ impl App {
             printers,
             printer_option,
             selected_printer,
+            color_delta_e_threshold,
+            color_delta_e_threshold_input: format_delta_e_threshold(color_delta_e_threshold),
             running: false,
         }
     }
@@ -1073,6 +1078,10 @@ impl App {
             self.vendas_screen,
         )
     }
+}
+
+fn format_delta_e_threshold(value: f64) -> String {
+    format!("{value:.2}").trim_end_matches('0').trim_end_matches('.').to_string()
 }
 
 fn format_money(value: f64) -> String {

@@ -35,7 +35,7 @@ Tabelas principais:
 - `estampas`: estampas cadastradas e SKU.
 - `tecido_cores`: vinculos de tecidos lisos com cores.
 - `tecido_estampas`: vinculos de tecidos estampados com estampas.
-- `configuracoes`: configuracoes locais persistidas no banco, como impressora de recibos.
+- `configuracoes`: configuracoes locais persistidas no banco, como impressora de recibos e limiar Delta E de cores.
 
 O app tambem garante em runtime as tabelas `configuracoes`, `estampas` e `tecido_estampas`, porque bancos locais antigos podem ter sido criados antes dessas migrations.
 
@@ -46,6 +46,7 @@ Configuracoes usam pares `chave`/`valor`.
 | Chave | Uso |
 | --- | --- |
 | `receipt_printer` | Nome da impressora de recibos 80mm selecionada em `Configuracoes`. |
+| `color_delta_e_threshold` | Limiar CIEDE2000 usado para bloquear cores visualmente proximas. Padrao: `3`. |
 | `shopee_access_token` | Token de acesso Shopee vigente. |
 | `shopee_refresh_token` | Refresh token Shopee vigente. |
 | `shopee_access_token_expires_at` | Expiracao UNIX do access token. |

@@ -266,6 +266,22 @@ impl App {
         if !self.cor_form.is_valid() {
             return;
         }
+        let nearby = nearby_colors(
+            &self.cor_form.hex,
+            &self.cores,
+            self.editing_cor_id,
+            self.color_delta_e_threshold,
+        );
+        if let Some(color) = nearby.first() {
+            self.db_status = format!(
+                "Cor bloqueada: Delta E {:.2} para {} ({}) abaixo do limiar {:.2}",
+                color.delta_e,
+                color.nome,
+                color.sku.as_deref().unwrap_or("sem SKU"),
+                self.color_delta_e_threshold
+            );
+            return;
+        }
 
         let nome = self.cor_form.nome.trim().to_string();
         if let Some(pool) = &self.db_pool {

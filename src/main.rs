@@ -52,6 +52,16 @@ fn main() -> io::Result<()> {
             .flatten(),
         None => None,
     };
+    let color_delta_e_threshold = match &pool {
+        Some(pool) => db_runtime
+            .block_on(db::get_config(pool, "color_delta_e_threshold"))
+            .ok()
+            .flatten()
+            .and_then(|value| value.replace(',', ".").parse::<f64>().ok())
+            .filter(|value| *value > 0.0)
+            .unwrap_or(3.0),
+        None => 3.0,
+    };
     let vendas_historico = match &pool {
         Some(pool) => db_runtime
             .block_on(db::list_vendas(pool))
@@ -81,6 +91,7 @@ fn main() -> io::Result<()> {
         cores,
         estampas,
         selected_printer,
+        color_delta_e_threshold,
         vendas_historico,
         pedidos_historico,
         shopee_status,

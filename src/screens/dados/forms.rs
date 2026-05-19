@@ -18,8 +18,10 @@ pub(super) fn render_cadastrar_cor(
     form: &CorForm,
     cores: &[CorRecord],
     editing_id: Option<i64>,
+    delta_e_threshold: f64,
     pending_delete: bool,
 ) {
+    let nearby = nearby_colors(&form.hex, cores, editing_id, delta_e_threshold);
     let lines = vec![
         format_cor_hex_field(CorField::Hex, form.selected_field, "Hex", &form.hex),
         format_cor_field(
@@ -33,7 +35,7 @@ pub(super) fn render_cadastrar_cor(
             CorField::Confirmar,
             form.selected_field,
             "[Confirmar]",
-            form.is_valid(),
+            form.is_valid() && nearby.is_empty(),
         ),
         format_cor_action(CorField::Voltar, form.selected_field, "[Voltar]", true),
         if editing_id.is_some() {
@@ -51,9 +53,46 @@ pub(super) fn render_cadastrar_cor(
         .direction(Direction::Horizontal)
         .constraints([Constraint::Min(40), Constraint::Length(SIDE_PANEL_WIDTH)])
         .split(area);
-    let sku = Paragraph::new(form.sku(cores, editing_id))
+    let proximity_lines = if parse_hex_color(&form.hex).is_some() {
+        let mut lines = vec![Line::from(vec![
+            Span::raw("Limiar Delta E: "),
+            Span::styled(
+                format!("{delta_e_threshold:.2}"),
+                Style::default().fg(Color::Yellow),
+            ),
+        ])];
+        if nearby.is_empty() {
+            lines.push(Line::from("Nenhuma cor proxima abaixo do limiar."));
+        } else {
+            lines.push(Line::from(Span::styled(
+                "Cor bloqueada: proximidade abaixo do limiar.",
+                Style::default().fg(Color::Red),
+            )));
+            for color in nearby.iter().take(6) {
+                lines.push(Line::from(vec![
+                    color_swatch(&color.hex),
+                    Span::raw(format!(
+                        " {} ({}) {} Delta E {:.2}",
+                        color.nome,
+                        color.sku.as_deref().unwrap_or("sem SKU"),
+                        color.hex,
+                        color.delta_e
+                    )),
+                ]));
+            }
+        }
+        lines
+    } else {
+        vec![Line::from("Digite um HEX valido para buscar cores proximas.")]
+    };
+    let sku = Paragraph::new(Text::from(vec![
+        Line::from(form.sku(cores, editing_id)),
+        Line::from(""),
+    ]
+    .into_iter()
+    .chain(proximity_lines)
+    .collect::<Vec<_>>()))
         .block(Block::default().title("SKU").borders(Borders::ALL))
-        .alignment(Alignment::Center)
         .style(Style::default().fg(Color::White));
 
     frame.render_widget(form_widget, chunks[0]);
