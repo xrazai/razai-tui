@@ -127,10 +127,11 @@ pub fn active_context(
 
 pub fn screen_context(form: &TecidoForm) -> String {
     format!(
-        "Formulario tecido: nome='{}', composicao='{}', largura='{}', rendimento='{}', gramatura_linear='{}', gramatura_m2='{}'.",
+        "Formulario tecido: nome='{}', composicao='{}', largura='{}', custo_base='{}', rendimento='{}', gramatura_linear='{}', gramatura_m2='{}'.",
         form.nome,
         form.composicao,
         form.largura,
+        form.custo_base,
         form.rendimento,
         form.gramatura_linear,
         form.gramatura_m2

@@ -1,0 +1,2 @@
+ALTER TABLE tecidos
+    ADD COLUMN IF NOT EXISTS custo_base NUMERIC(12, 2);

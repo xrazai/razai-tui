@@ -62,6 +62,7 @@ pub struct App {
     pub vinculo_tecido_option: usize,
     pub vinculo_criar_option: usize,
     pub vinculo_lista_option: usize,
+    pub vinculo_detalhe_option: VinculoDetalheOption,
     pub vinculo_image_slot: VinculoImageSlot,
     pub vinculo_images: VinculoImages,
     pub vinculo_thumbnail: Option<ImageProtocol>,
@@ -70,6 +71,9 @@ pub struct App {
     pub image_protocol_status: String,
     pub vinculo_image_upload_started: Option<Instant>,
     vinculo_image_upload_rx: Option<Receiver<VinculoImageUploadResult>>,
+    pub pending_unlink_vinculo: bool,
+    pub vinculo_custo_input: String,
+    pub editing_vinculo_custo: bool,
     pub tecidos: Vec<TecidoRecord>,
     pub cores: Vec<CorRecord>,
     pub estampas: Vec<EstampaRecord>,
@@ -192,6 +196,7 @@ impl App {
             vinculo_tecido_option: 0,
             vinculo_criar_option: 0,
             vinculo_lista_option: 0,
+            vinculo_detalhe_option: VinculoDetalheOption::default(),
             vinculo_image_slot: VinculoImageSlot::default(),
             vinculo_images: VinculoImages::default(),
             vinculo_thumbnail: None,
@@ -200,6 +205,9 @@ impl App {
             image_protocol_status,
             vinculo_image_upload_started: None,
             vinculo_image_upload_rx: None,
+            pending_unlink_vinculo: false,
+            vinculo_custo_input: String::new(),
+            editing_vinculo_custo: false,
             tecidos,
             cores,
             estampas,
@@ -347,6 +355,14 @@ impl App {
             return;
         }
 
+        if self.section == Section::Dados
+            && self.dados_screen == DadosScreen::VinculoDetalhe
+            && self.editing_vinculo_custo
+        {
+            self.handle_vinculo_custo_key(key.code);
+            return;
+        }
+
         if matches!(key.code, KeyCode::Tab | KeyCode::BackTab) {
             self.handle_focus_tab(key.code);
             return;
@@ -354,6 +370,14 @@ impl App {
 
         if self.focus == Focus::Chat {
             self.handle_chat_key(key.code);
+            return;
+        }
+
+        if self.section == Section::Dados
+            && self.dados_screen == DadosScreen::VinculoDetalhe
+            && self.pending_unlink_vinculo
+        {
+            self.handle_desfazer_vinculo_confirmation(key.code);
             return;
         }
 
@@ -1229,7 +1253,7 @@ impl App {
         let pedido_total = self.pedido_itens.iter().map(VendaItem::total).sum::<f64>();
 
         format!(
-            "Projeto Razai TUI: sistema terminal para loja de tecidos com Dashboard, Vendas, Pedidos, Dados, Estoque, Shopee, Documentos e Configuracoes. Tela atual: {}. Status: {}. Dados carregados: {} tecidos, {} cores, {} estampas, {} vendas no periodo {}..{}, {} pedidos. Tecidos: {}. Cores: {}. Estampas: {}. Vendas recentes: {}. Pedidos recentes: {}. Venda em andamento: {} itens, total R${}, preco='{}', quantidade='{}'. Pedido em andamento: {} itens, total R${}, preco='{}', quantidade='{}'. Impressora: {}. Formulario tecido: nome='{}', composicao='{}', largura='{}', tipo='{}'. Regras: gravacoes exigem confirmacao; vendas viram historico; pedidos geram PDF em pdf_pedidos e podem ser aprovados como venda; documentos geram checklist PDF fora do workspace em Documents\\Razai\\checklists.",
+            "Projeto Razai TUI: sistema terminal para loja de tecidos com Dashboard, Vendas, Pedidos, Dados, Estoque, Shopee, Documentos e Configuracoes. Tela atual: {}. Status: {}. Dados carregados: {} tecidos, {} cores, {} estampas, {} vendas no periodo {}..{}, {} pedidos. Tecidos: {}. Cores: {}. Estampas: {}. Vendas recentes: {}. Pedidos recentes: {}. Venda em andamento: {} itens, total R${}, preco='{}', quantidade='{}'. Pedido em andamento: {} itens, total R${}, preco='{}', quantidade='{}'. Impressora: {}. Formulario tecido: nome='{}', composicao='{}', largura='{}', custo_base='{}', tipo='{}'. Regras: gravacoes exigem confirmacao; vendas viram historico; pedidos geram PDF em pdf_pedidos e podem ser aprovados como venda; documentos geram checklist PDF fora do workspace em Documents\\Razai\\checklists.",
             self.section.title(),
             self.db_status,
             self.tecidos.len(),
@@ -1256,6 +1280,7 @@ impl App {
             self.tecido_form.nome,
             self.tecido_form.composicao,
             self.tecido_form.largura,
+            self.tecido_form.custo_base,
             self.tecido_form.tipo.value(TIPO_OPTIONS)
         )
     }

@@ -1244,6 +1244,7 @@ where
 #[cfg(test)]
 mod tests {
     use crate::{app::App, db};
+    use ratatui_image::picker::Picker;
     use sqlx::Row;
     use tokio::runtime::Runtime;
 
@@ -1393,6 +1394,12 @@ mod tests {
         runtime
             .block_on(db::ensure_pedidos_tables(&pool))
             .expect("pedidos");
+        runtime
+            .block_on(db::ensure_tecido_custo_base_column(&pool))
+            .expect("custo base tecido");
+        runtime
+            .block_on(db::ensure_vinculo_image_columns(&pool))
+            .expect("imagens vinculos");
         let tecidos = runtime
             .block_on(db::list_tecidos(&pool))
             .unwrap_or_default();
@@ -1414,6 +1421,8 @@ mod tests {
             vendas,
             pedidos,
             String::from("Shopee nao verificada nos testes"),
+            Picker::halfblocks(),
+            String::from("Preview: Halfblocks fallback"),
             runtime,
         );
         (app, pool)

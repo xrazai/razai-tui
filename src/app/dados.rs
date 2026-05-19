@@ -8,7 +8,7 @@ use std::{
 
 use super::{App, VinculoImageUploadResult};
 use crate::{
-    db::{self, TecidoRecord, VinculoRecord},
+    db::{self, TecidoRecord, VinculoImages, VinculoRecord},
     models::*,
 };
 use crossterm::event::KeyCode;
@@ -153,6 +153,7 @@ impl App {
                 self.dados_screen = DadosScreen::VinculosMenu;
             }
             DadosScreen::VinculoDetalhe => {
+                self.pending_unlink_vinculo = false;
                 self.dados_screen = DadosScreen::VinculosLista;
             }
             DadosScreen::VinculosSelecionarTecidoCriar
@@ -516,30 +517,95 @@ impl App {
             return;
         }
         self.focus = Focus::System;
+        self.pending_unlink_vinculo = false;
+        self.editing_vinculo_custo = false;
+        self.vinculo_detalhe_option = VinculoDetalheOption::Slot(VinculoImageSlot::Original);
         self.vinculo_image_slot = VinculoImageSlot::Original;
+        self.refresh_vinculo_custo_input();
         self.load_vinculo_images();
         self.dados_screen = DadosScreen::VinculoDetalhe;
     }
 
     pub(super) fn handle_vinculo_detalhe_enter(&mut self) {
-        self.abrir_dialogo_e_salvar_vinculo_image();
+        if self.pending_unlink_vinculo {
+            self.desfazer_vinculo_confirmado();
+            return;
+        }
+
+        match self.vinculo_detalhe_option {
+            VinculoDetalheOption::Slot(_) => self.abrir_dialogo_e_salvar_vinculo_image(),
+            VinculoDetalheOption::Custo => {
+                self.editing_vinculo_custo = true;
+                self.db_status =
+                    String::from("Editando custo do vinculo. Vazio usa o custo base do tecido.");
+            }
+            VinculoDetalheOption::Desfazer => {
+                self.pending_unlink_vinculo = true;
+                self.db_status =
+                    String::from("Confirmar desfazer vinculo? S/Enter confirma, N/Esc cancela.");
+            }
+        }
+    }
+
+    pub(super) fn handle_desfazer_vinculo_confirmation(&mut self, key: KeyCode) {
+        match key {
+            KeyCode::Enter | KeyCode::Char('s') | KeyCode::Char('S') => {
+                self.desfazer_vinculo_confirmado();
+            }
+            KeyCode::Esc | KeyCode::Char('n') | KeyCode::Char('N') => {
+                self.pending_unlink_vinculo = false;
+                self.db_status = String::from("Desfazer vinculo cancelado.");
+            }
+            _ => {}
+        }
+    }
+
+    pub(super) fn handle_vinculo_custo_key(&mut self, key: KeyCode) {
+        match key {
+            KeyCode::Enter => self.salvar_vinculo_custo_override(),
+            KeyCode::Esc => {
+                self.editing_vinculo_custo = false;
+                self.refresh_vinculo_custo_input();
+                self.db_status = String::from("Edicao de custo do vinculo cancelada.");
+            }
+            KeyCode::Backspace => {
+                self.vinculo_custo_input.pop();
+            }
+            KeyCode::Char(character) if !character.is_control() => {
+                self.vinculo_custo_input.push(character);
+            }
+            _ => {}
+        }
     }
 
     pub(super) fn select_vinculo_image_slot_shortcut(&mut self, character: char) {
         if let Some(slot) = VinculoImageSlot::from_shortcut(character) {
+            self.pending_unlink_vinculo = false;
+            self.editing_vinculo_custo = false;
+            self.vinculo_detalhe_option = VinculoDetalheOption::Slot(slot);
             self.vinculo_image_slot = slot;
             self.refresh_vinculo_thumbnail();
         }
     }
 
     pub(super) fn next_vinculo_image_slot(&mut self) {
-        self.vinculo_image_slot = self.vinculo_image_slot.next();
-        self.refresh_vinculo_thumbnail();
+        self.pending_unlink_vinculo = false;
+        self.editing_vinculo_custo = false;
+        self.vinculo_detalhe_option = self.vinculo_detalhe_option.next();
+        if let Some(slot) = self.vinculo_detalhe_option.selected_slot() {
+            self.vinculo_image_slot = slot;
+            self.refresh_vinculo_thumbnail();
+        }
     }
 
     pub(super) fn previous_vinculo_image_slot(&mut self) {
-        self.vinculo_image_slot = self.vinculo_image_slot.previous();
-        self.refresh_vinculo_thumbnail();
+        self.pending_unlink_vinculo = false;
+        self.editing_vinculo_custo = false;
+        self.vinculo_detalhe_option = self.vinculo_detalhe_option.previous();
+        if let Some(slot) = self.vinculo_detalhe_option.selected_slot() {
+            self.vinculo_image_slot = slot;
+            self.refresh_vinculo_thumbnail();
+        }
     }
 
     pub(super) fn navigate_vinculo_detalhe(&mut self, key: KeyCode) {
@@ -553,9 +619,14 @@ impl App {
             }
             _ => (self.vinculo_lista_option + 1) % self.vinculos.len(),
         };
+        self.pending_unlink_vinculo = false;
+        self.editing_vinculo_custo = false;
+        self.vinculo_detalhe_option = VinculoDetalheOption::Slot(VinculoImageSlot::Original);
         self.vinculo_image_slot = VinculoImageSlot::Original;
+        self.refresh_vinculo_custo_input();
         self.load_vinculo_images();
         if let Some(slot) = self.first_empty_vinculo_image_slot() {
+            self.vinculo_detalhe_option = VinculoDetalheOption::Slot(slot);
             self.vinculo_image_slot = slot;
             self.refresh_vinculo_thumbnail();
         }
@@ -653,7 +724,10 @@ impl App {
                     .block_on(db::list_vinculos_by_tecido(pool, tecido_id))
             };
             match result {
-                Ok(vinculos) => self.vinculos = vinculos,
+                Ok(vinculos) => {
+                    self.vinculos = vinculos;
+                    self.refresh_vinculo_custo_input();
+                }
                 Err(error) => self.db_status = format!("Erro ao carregar vinculos: {error}"),
             }
         }
@@ -754,6 +828,7 @@ impl App {
 
     fn advance_after_vinculo_image_upload(&mut self) {
         if let Some(slot) = self.first_empty_vinculo_image_slot() {
+            self.vinculo_detalhe_option = VinculoDetalheOption::Slot(slot);
             self.vinculo_image_slot = slot;
             self.refresh_vinculo_thumbnail();
             return;
@@ -764,6 +839,7 @@ impl App {
         }
 
         self.vinculo_image_slot = VinculoImageSlot::Original;
+        self.vinculo_detalhe_option = VinculoDetalheOption::Slot(VinculoImageSlot::Original);
         self.refresh_vinculo_thumbnail();
     }
 
@@ -778,9 +854,12 @@ impl App {
             if Self::vinculo_record_image_count(&self.vinculos[index]) < VinculoImageSlot::ALL.len()
             {
                 self.vinculo_lista_option = index;
+                self.vinculo_detalhe_option =
+                    VinculoDetalheOption::Slot(VinculoImageSlot::Original);
                 self.vinculo_image_slot = VinculoImageSlot::Original;
                 self.load_vinculo_images();
                 if let Some(slot) = self.first_empty_vinculo_image_slot() {
+                    self.vinculo_detalhe_option = VinculoDetalheOption::Slot(slot);
                     self.vinculo_image_slot = slot;
                     self.refresh_vinculo_thumbnail();
                 }
@@ -791,10 +870,110 @@ impl App {
         false
     }
 
+    fn desfazer_vinculo_confirmado(&mut self) {
+        let Some((tecido_id, item_id, usa_estampas)) = self.selected_vinculo_keys() else {
+            self.pending_unlink_vinculo = false;
+            return;
+        };
+        let Some(pool) = &self.db_pool else {
+            self.pending_unlink_vinculo = false;
+            self.db_status = String::from("Banco local indisponivel para desfazer vinculo.");
+            return;
+        };
+
+        match self.db_runtime.block_on(db::deactivate_vinculo(
+            pool,
+            tecido_id,
+            item_id,
+            usa_estampas,
+        )) {
+            Ok(()) => {
+                self.pending_unlink_vinculo = false;
+                self.load_vinculos(tecido_id);
+                if self.vinculos.is_empty() {
+                    self.vinculo_images = VinculoImages::default();
+                    self.vinculo_thumbnail = None;
+                    self.vinculo_lista_option = 0;
+                    self.vinculo_custo_input.clear();
+                    self.dados_screen = DadosScreen::VinculosLista;
+                } else {
+                    self.vinculo_lista_option = self
+                        .vinculo_lista_option
+                        .min(self.vinculos.len().saturating_sub(1));
+                    self.vinculo_detalhe_option =
+                        VinculoDetalheOption::Slot(VinculoImageSlot::Original);
+                    self.vinculo_image_slot = VinculoImageSlot::Original;
+                    self.refresh_vinculo_custo_input();
+                    self.load_vinculo_images();
+                }
+                self.db_status = String::from("Vinculo desfeito para novos lancamentos.");
+            }
+            Err(error) => {
+                self.pending_unlink_vinculo = false;
+                self.db_status = format!("Erro ao desfazer vinculo: {error}");
+            }
+        }
+    }
+
     fn selected_vinculo_keys(&self) -> Option<(i64, i64, bool)> {
         let tecido = self.selected_vinculo_tecido()?;
         let vinculo = self.vinculos.get(self.vinculo_lista_option)?;
         Some((tecido.id, vinculo.cor_id, tecido.tipo == "Estampado"))
+    }
+
+    fn refresh_vinculo_custo_input(&mut self) {
+        self.vinculo_custo_input = self
+            .vinculos
+            .get(self.vinculo_lista_option)
+            .and_then(|vinculo| vinculo.custo_override)
+            .map(|value| format!("{value:.2}"))
+            .unwrap_or_default();
+    }
+
+    fn salvar_vinculo_custo_override(&mut self) {
+        let Some((tecido_id, item_id, usa_estampas)) = self.selected_vinculo_keys() else {
+            self.editing_vinculo_custo = false;
+            return;
+        };
+        let Some(pool) = &self.db_pool else {
+            self.editing_vinculo_custo = false;
+            self.db_status = String::from("Banco local indisponivel para salvar custo do vinculo.");
+            return;
+        };
+
+        let custo_override = if self.vinculo_custo_input.trim().is_empty() {
+            None
+        } else {
+            match parse_number(&self.vinculo_custo_input).filter(|value| *value >= 0.0) {
+                Some(value) => Some(value),
+                None => {
+                    self.db_status = String::from("Custo do vinculo invalido.");
+                    return;
+                }
+            }
+        };
+
+        match self.db_runtime.block_on(db::update_vinculo_custo_override(
+            pool,
+            tecido_id,
+            item_id,
+            usa_estampas,
+            custo_override,
+        )) {
+            Ok(()) => {
+                self.editing_vinculo_custo = false;
+                self.load_vinculos(tecido_id);
+                self.refresh_vinculo_custo_input();
+                self.db_status = if custo_override.is_some() {
+                    String::from("Custo especifico do vinculo salvo.")
+                } else {
+                    String::from("Custo especifico removido; usando custo base do tecido.")
+                };
+            }
+            Err(error) => {
+                self.db_status = format!("Erro ao salvar custo do vinculo: {error}");
+            }
+        }
     }
 
     fn refresh_vinculo_thumbnail(&mut self) {

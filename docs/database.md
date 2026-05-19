@@ -30,14 +30,14 @@ As migrations ficam em `migrations/`. Na primeira vez que o container sobe, o Po
 
 Tabelas principais:
 
-- `tecidos`: tecidos cadastrados, SKU, composicao, largura, tipo e gramaturas.
+- `tecidos`: tecidos cadastrados, SKU, composicao, largura, custo base, tipo e gramaturas.
 - `cores`: cores cadastradas, hexadecimal, swatch derivado e SKU.
 - `estampas`: estampas cadastradas e SKU.
 - `tecido_cores`: vinculos de tecidos lisos com cores.
 - `tecido_estampas`: vinculos de tecidos estampados com estampas.
 - `configuracoes`: configuracoes locais persistidas no banco, como impressora de recibos e limiar Delta E de cores.
 
-O app tambem garante em runtime as tabelas `configuracoes`, `estampas` e `tecido_estampas`, porque bancos locais antigos podem ter sido criados antes dessas migrations.
+O app tambem garante em runtime as tabelas `configuracoes`, `estampas` e `tecido_estampas`, alem das colunas `tecidos.custo_base` e `custo_override` nos vinculos, porque bancos locais antigos podem ter sido criados antes dessas migrations.
 
 ## Imagens de Vinculos
 
@@ -49,8 +49,10 @@ As tabelas `tecido_cores` e `tecido_estampas` possuem quatro colunas `BYTEA` par
 | `imagem_brand` | Imagem de marca/branding. |
 | `imagem_modelo` | Imagem com modelo. |
 | `imagem_alternativa` | Imagem alternativa/complementar. |
+| `custo_override` | Custo especifico do vinculo quando uma cor/estampa foge do custo base do tecido. Vazio usa `tecidos.custo_base`. |
+| `ativo` | Controla se o vinculo aparece para novos lancamentos. `Desfazer Vinculo` marca `ativo = false` sem remover o registro nem suas imagens. |
 
-Ao salvar novamente a lista de vinculos de um tecido, os registros mantidos preservam essas imagens; apenas os vinculos desmarcados sao removidos.
+Ao salvar novamente a lista de vinculos de um tecido, os registros mantidos preservam essas imagens; vinculos desmarcados sao marcados como inativos. Se forem selecionados novamente, sao reativados.
 
 O TUI pode renderizar thumbnail de qualquer um dos quatro slots no detalhe do vinculo. As imagens continuam armazenadas como bytes originais no banco; cache, redimensionamento e protocolo de terminal sao apenas estado de exibicao em memoria.
 

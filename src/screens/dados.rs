@@ -13,7 +13,7 @@ use crate::{
     app::App,
     db::{CorRecord, EstampaRecord, TecidoRecord, VinculoRecord},
     models::*,
-    ui::color_swatch,
+    ui::{centered_rect, color_swatch, render_dialog_background},
 };
 
 pub fn render(frame: &mut Frame, area: Rect, app: &App) {
@@ -349,18 +349,42 @@ fn render_vinculo_detalhe(frame: &mut Frame, area: Rect, app: &App) {
         .constraints([Constraint::Min(54), Constraint::Length(46)])
         .split(area);
 
-    let slot_items = VinculoImageSlot::ALL.iter().map(|slot| {
-        let has_image = match slot {
-            VinculoImageSlot::Original => app.vinculo_images.imagem_original.is_some(),
-            VinculoImageSlot::Brand => app.vinculo_images.imagem_brand.is_some(),
-            VinculoImageSlot::Modelo => app.vinculo_images.imagem_modelo.is_some(),
-            VinculoImageSlot::Alternativa => app.vinculo_images.imagem_alternativa.is_some(),
-        };
-        let marker = if has_image { "[+]" } else { "[ ]" };
-        ListItem::new(format!("{} {marker} {}", slot.index() + 1, slot.title()))
+    let slot_items = VinculoDetalheOption::ALL.iter().map(|option| match option {
+        VinculoDetalheOption::Slot(slot) => {
+            let has_image = match slot {
+                VinculoImageSlot::Original => app.vinculo_images.imagem_original.is_some(),
+                VinculoImageSlot::Brand => app.vinculo_images.imagem_brand.is_some(),
+                VinculoImageSlot::Modelo => app.vinculo_images.imagem_modelo.is_some(),
+                VinculoImageSlot::Alternativa => app.vinculo_images.imagem_alternativa.is_some(),
+            };
+            let marker = if has_image { "[+]" } else { "[ ]" };
+            ListItem::new(format!("{} {marker} {}", slot.index() + 1, slot.title()))
+        }
+        VinculoDetalheOption::Custo => {
+            let effective = format_optional_money(vinculo.custo_efetivo);
+            let base = format_optional_money(vinculo.tecido_custo_base);
+            let value = if app.editing_vinculo_custo {
+                if app.vinculo_custo_input.is_empty() {
+                    String::from("_")
+                } else {
+                    app.vinculo_custo_input.clone()
+                }
+            } else {
+                effective
+            };
+            let source = if vinculo.custo_override.is_some() {
+                "especifico"
+            } else {
+                "base"
+            };
+            ListItem::new(format!(
+                "[Custo vinculo] R$ {value} ({source}; base R$ {base})"
+            ))
+        }
+        VinculoDetalheOption::Desfazer => ListItem::new("[Desfazer Vinculo]"),
     });
     let current_count = app.vinculo_current_image_count();
-    let mut state = ListState::default().with_selected(Some(app.vinculo_image_slot.index()));
+    let mut state = ListState::default().with_selected(Some(app.vinculo_detalhe_option.index()));
     let detail = List::new(slot_items)
         .block(
             Block::default()
@@ -417,7 +441,7 @@ fn render_vinculo_detalhe(frame: &mut Frame, area: Rect, app: &App) {
 
     frame.render_widget(
         Paragraph::new(format!(
-            "1-4 slot | Enter upload e avanca | Tab proximo vinculo | Shift+Tab anterior | {}",
+            "1-4 slot | Enter upload/editar/confirmar | Custo vazio usa base | Tab proximo vinculo | Shift+Tab anterior | {}",
             app.image_protocol_status
         ))
         .style(Style::default().fg(Color::DarkGray)),
@@ -428,4 +452,22 @@ fn render_vinculo_detalhe(frame: &mut Frame, area: Rect, app: &App) {
             height: 1,
         },
     );
+
+    if app.pending_unlink_vinculo {
+        let dialog_area = centered_rect(56, 7, area);
+        render_dialog_background(frame, dialog_area);
+        let dialog = Paragraph::new(format!(
+            "Desfazer vinculo de {} / {}?\n\nEle deixara de aparecer para novos lancamentos. Historico e imagens permanecem no banco.\nS/Enter confirma   N/Esc cancela",
+            vinculo.tecido_nome, vinculo.cor_nome
+        ))
+        .block(Block::default().title("Confirmar").borders(Borders::ALL))
+        .style(Style::default().fg(Color::Yellow));
+        frame.render_widget(dialog, dialog_area);
+    }
+}
+
+fn format_optional_money(value: Option<f64>) -> String {
+    value
+        .map(|value| format!("{value:.2}").replace('.', ","))
+        .unwrap_or_else(|| String::from("nao definido"))
 }

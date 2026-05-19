@@ -6,7 +6,7 @@ pub use orders::*;
 pub use sales::*;
 
 use crate::models::{
-    ACABAMENTO_OPTIONS, NIVEL_OPTIONS, TIPO_OPTIONS, TecidoForm, parse_largura_m,
+    ACABAMENTO_OPTIONS, NIVEL_OPTIONS, TIPO_OPTIONS, TecidoForm, parse_largura_m, parse_number,
     round_to_nearest_ten,
 };
 
@@ -42,6 +42,14 @@ pub async fn ensure_configuracoes_table(pool: &PgPool) -> Result<(), sqlx::Error
     )
     .execute(pool)
     .await?;
+
+    Ok(())
+}
+
+pub async fn ensure_tecido_custo_base_column(pool: &PgPool) -> Result<(), sqlx::Error> {
+    sqlx::query("ALTER TABLE tecidos ADD COLUMN IF NOT EXISTS custo_base NUMERIC(12, 2)")
+        .execute(pool)
+        .await?;
 
     Ok(())
 }
@@ -181,6 +189,16 @@ pub async fn ensure_vinculo_image_columns(pool: &PgPool) -> Result<(), sqlx::Err
             .execute(pool)
             .await?;
         }
+        sqlx::query(&format!(
+            "ALTER TABLE {table} ADD COLUMN IF NOT EXISTS ativo BOOLEAN NOT NULL DEFAULT TRUE"
+        ))
+        .execute(pool)
+        .await?;
+        sqlx::query(&format!(
+            "ALTER TABLE {table} ADD COLUMN IF NOT EXISTS custo_override NUMERIC(12, 2)"
+        ))
+        .execute(pool)
+        .await?;
     }
 
     Ok(())
@@ -219,6 +237,7 @@ pub struct TecidoRecord {
     pub sku: String,
     pub composicao: String,
     pub largura_m: f64,
+    pub custo_base: Option<f64>,
     pub rendimento_m_kg: Option<f64>,
     pub gramatura_linear_g_m: Option<i32>,
     pub gramatura_g_m2: Option<i32>,
@@ -250,6 +269,9 @@ pub struct VinculoRecord {
     pub cor_nome: String,
     pub cor_hex: Option<String>,
     pub sku: Option<String>,
+    pub tecido_custo_base: Option<f64>,
+    pub custo_override: Option<f64>,
+    pub custo_efetivo: Option<f64>,
     pub has_imagem_original: bool,
     pub has_imagem_brand: bool,
     pub has_imagem_modelo: bool,
@@ -273,6 +295,7 @@ pub async fn list_tecidos(pool: &PgPool) -> Result<Vec<TecidoRecord>, sqlx::Erro
             sku,
             composicao,
             largura_m::float8 AS largura_m,
+            custo_base::float8 AS custo_base,
             rendimento_m_kg::float8 AS rendimento_m_kg,
             gramatura_linear_g_m,
             gramatura_g_m2,
@@ -295,6 +318,7 @@ pub async fn list_tecidos(pool: &PgPool) -> Result<Vec<TecidoRecord>, sqlx::Erro
             sku: row.get("sku"),
             composicao: row.get("composicao"),
             largura_m: row.get("largura_m"),
+            custo_base: row.get("custo_base"),
             rendimento_m_kg: row.get("rendimento_m_kg"),
             gramatura_linear_g_m: row.get("gramatura_linear_g_m"),
             gramatura_g_m2: row.get("gramatura_g_m2"),
@@ -309,6 +333,7 @@ pub async fn list_tecidos(pool: &PgPool) -> Result<Vec<TecidoRecord>, sqlx::Erro
 pub async fn insert_tecido(pool: &PgPool, form: &TecidoForm, sku: &str) -> Result<(), sqlx::Error> {
     let calculated = form.calculated_values();
     let largura_m = parse_largura_m(&form.largura).unwrap_or_default();
+    let custo_base = parse_number(&form.custo_base).filter(|value| *value >= 0.0);
     let rendimento = calculated.rendimento;
     let gramatura_linear = rounded_gramatura(calculated.gramatura_linear);
     let gramatura_m2 = rounded_gramatura(calculated.gramatura_m2);
@@ -320,6 +345,7 @@ pub async fn insert_tecido(pool: &PgPool, form: &TecidoForm, sku: &str) -> Resul
             sku,
             composicao,
             largura_m,
+            custo_base,
             rendimento_m_kg,
             gramatura_linear_g_m,
             gramatura_g_m2,
@@ -328,13 +354,14 @@ pub async fn insert_tecido(pool: &PgPool, form: &TecidoForm, sku: &str) -> Resul
             elasticidade,
             acabamento
         )
-        VALUES ($1, $2, $3, $4::numeric, $5::numeric, $6, $7, $8, $9, $10, $11)
+        VALUES ($1, $2, $3, $4::numeric, $5::numeric, $6::numeric, $7, $8, $9, $10, $11, $12)
         "#,
     )
     .bind(form.nome.trim())
     .bind(sku)
     .bind(form.composicao.trim())
     .bind(largura_m)
+    .bind(custo_base)
     .bind(rendimento)
     .bind(gramatura_linear)
     .bind(gramatura_m2)
@@ -356,6 +383,7 @@ pub async fn update_tecido(
 ) -> Result<(), sqlx::Error> {
     let calculated = form.calculated_values();
     let largura_m = parse_largura_m(&form.largura).unwrap_or_default();
+    let custo_base = parse_number(&form.custo_base).filter(|value| *value >= 0.0);
     let rendimento = calculated.rendimento;
     let gramatura_linear = rounded_gramatura(calculated.gramatura_linear);
     let gramatura_m2 = rounded_gramatura(calculated.gramatura_m2);
@@ -368,20 +396,22 @@ pub async fn update_tecido(
             sku = $2,
             composicao = $3,
             largura_m = $4::numeric,
-            rendimento_m_kg = $5::numeric,
-            gramatura_linear_g_m = $6,
-            gramatura_g_m2 = $7,
-            tipo = $8,
-            transparencia = $9,
-            elasticidade = $10,
-            acabamento = $11
-        WHERE id = $12
+            custo_base = $5::numeric,
+            rendimento_m_kg = $6::numeric,
+            gramatura_linear_g_m = $7,
+            gramatura_g_m2 = $8,
+            tipo = $9,
+            transparencia = $10,
+            elasticidade = $11,
+            acabamento = $12
+        WHERE id = $13
         "#,
     )
     .bind(form.nome.trim())
     .bind(sku)
     .bind(form.composicao.trim())
     .bind(largura_m)
+    .bind(custo_base)
     .bind(rendimento)
     .bind(gramatura_linear)
     .bind(gramatura_m2)
@@ -526,6 +556,9 @@ pub async fn list_vinculos_by_tecido(
             c.nome AS cor_nome,
             c.codigo_hex AS cor_hex,
             tc.sku,
+            t.custo_base::float8 AS tecido_custo_base,
+            tc.custo_override::float8 AS custo_override,
+            COALESCE(tc.custo_override, t.custo_base)::float8 AS custo_efetivo,
             tc.imagem_original IS NOT NULL AS has_imagem_original,
             tc.imagem_brand IS NOT NULL AS has_imagem_brand,
             tc.imagem_modelo IS NOT NULL AS has_imagem_modelo,
@@ -533,7 +566,7 @@ pub async fn list_vinculos_by_tecido(
         FROM tecido_cores tc
         JOIN tecidos t ON t.id = tc.tecido_id
         JOIN cores c ON c.id = tc.cor_id
-        WHERE tc.tecido_id = $1
+        WHERE tc.tecido_id = $1 AND tc.ativo = TRUE
         ORDER BY c.nome, c.id
         "#,
     )
@@ -549,6 +582,9 @@ pub async fn list_vinculos_by_tecido(
             cor_nome: row.get("cor_nome"),
             cor_hex: row.get("cor_hex"),
             sku: row.get("sku"),
+            tecido_custo_base: row.get("tecido_custo_base"),
+            custo_override: row.get("custo_override"),
+            custo_efetivo: row.get("custo_efetivo"),
             has_imagem_original: row.get("has_imagem_original"),
             has_imagem_brand: row.get("has_imagem_brand"),
             has_imagem_modelo: row.get("has_imagem_modelo"),
@@ -569,6 +605,9 @@ pub async fn list_estampa_vinculos_by_tecido(
             e.nome AS cor_nome,
             NULL::text AS cor_hex,
             te.sku,
+            t.custo_base::float8 AS tecido_custo_base,
+            te.custo_override::float8 AS custo_override,
+            COALESCE(te.custo_override, t.custo_base)::float8 AS custo_efetivo,
             te.imagem_original IS NOT NULL AS has_imagem_original,
             te.imagem_brand IS NOT NULL AS has_imagem_brand,
             te.imagem_modelo IS NOT NULL AS has_imagem_modelo,
@@ -576,7 +615,7 @@ pub async fn list_estampa_vinculos_by_tecido(
         FROM tecido_estampas te
         JOIN tecidos t ON t.id = te.tecido_id
         JOIN estampas e ON e.id = te.estampa_id
-        WHERE te.tecido_id = $1
+        WHERE te.tecido_id = $1 AND te.ativo = TRUE
         ORDER BY e.nome, e.id
         "#,
     )
@@ -592,6 +631,9 @@ pub async fn list_estampa_vinculos_by_tecido(
             cor_nome: row.get("cor_nome"),
             cor_hex: row.get("cor_hex"),
             sku: row.get("sku"),
+            tecido_custo_base: row.get("tecido_custo_base"),
+            custo_override: row.get("custo_override"),
+            custo_efetivo: row.get("custo_efetivo"),
             has_imagem_original: row.get("has_imagem_original"),
             has_imagem_brand: row.get("has_imagem_brand"),
             has_imagem_modelo: row.get("has_imagem_modelo"),
@@ -667,6 +709,56 @@ pub async fn update_vinculo_image(
     Ok(())
 }
 
+pub async fn update_vinculo_custo_override(
+    pool: &PgPool,
+    tecido_id: i64,
+    item_id: i64,
+    usa_estampas: bool,
+    custo_override: Option<f64>,
+) -> Result<(), sqlx::Error> {
+    let table = if usa_estampas {
+        "tecido_estampas"
+    } else {
+        "tecido_cores"
+    };
+    let item_column = if usa_estampas { "estampa_id" } else { "cor_id" };
+
+    sqlx::query(&format!(
+        "UPDATE {table} SET custo_override = $1::numeric WHERE tecido_id = $2 AND {item_column} = $3"
+    ))
+    .bind(custo_override)
+    .bind(tecido_id)
+    .bind(item_id)
+    .execute(pool)
+    .await?;
+
+    Ok(())
+}
+
+pub async fn deactivate_vinculo(
+    pool: &PgPool,
+    tecido_id: i64,
+    item_id: i64,
+    usa_estampas: bool,
+) -> Result<(), sqlx::Error> {
+    let table = if usa_estampas {
+        "tecido_estampas"
+    } else {
+        "tecido_cores"
+    };
+    let item_column = if usa_estampas { "estampa_id" } else { "cor_id" };
+
+    sqlx::query(&format!(
+        "UPDATE {table} SET ativo = FALSE WHERE tecido_id = $1 AND {item_column} = $2"
+    ))
+    .bind(tecido_id)
+    .bind(item_id)
+    .execute(pool)
+    .await?;
+
+    Ok(())
+}
+
 pub async fn replace_vinculos(
     pool: &PgPool,
     tecido_id: i64,
@@ -678,19 +770,21 @@ pub async fn replace_vinculos(
         .iter()
         .map(|(cor_id, _)| *cor_id)
         .collect::<Vec<_>>();
-    sqlx::query("DELETE FROM tecido_cores WHERE tecido_id = $1 AND NOT (cor_id = ANY($2))")
-        .bind(tecido_id)
-        .bind(&selected_ids)
-        .execute(&mut *transaction)
-        .await?;
+    sqlx::query(
+        "UPDATE tecido_cores SET ativo = FALSE WHERE tecido_id = $1 AND NOT (cor_id = ANY($2))",
+    )
+    .bind(tecido_id)
+    .bind(&selected_ids)
+    .execute(&mut *transaction)
+    .await?;
 
     for (cor_id, sku) in vinculos {
         sqlx::query(
             r#"
-            INSERT INTO tecido_cores (tecido_id, cor_id, sku)
-            VALUES ($1, $2, $3)
+            INSERT INTO tecido_cores (tecido_id, cor_id, sku, ativo)
+            VALUES ($1, $2, $3, TRUE)
             ON CONFLICT (tecido_id, cor_id)
-            DO UPDATE SET sku = EXCLUDED.sku
+            DO UPDATE SET sku = EXCLUDED.sku, ativo = TRUE
             "#,
         )
         .bind(tecido_id)
@@ -716,7 +810,7 @@ pub async fn replace_estampa_vinculos(
         .iter()
         .map(|(estampa_id, _)| *estampa_id)
         .collect::<Vec<_>>();
-    sqlx::query("DELETE FROM tecido_estampas WHERE tecido_id = $1 AND NOT (estampa_id = ANY($2))")
+    sqlx::query("UPDATE tecido_estampas SET ativo = FALSE WHERE tecido_id = $1 AND NOT (estampa_id = ANY($2))")
         .bind(tecido_id)
         .bind(&selected_ids)
         .execute(&mut *transaction)
@@ -725,10 +819,10 @@ pub async fn replace_estampa_vinculos(
     for (estampa_id, sku) in vinculos {
         sqlx::query(
             r#"
-            INSERT INTO tecido_estampas (tecido_id, estampa_id, sku)
-            VALUES ($1, $2, $3)
+            INSERT INTO tecido_estampas (tecido_id, estampa_id, sku, ativo)
+            VALUES ($1, $2, $3, TRUE)
             ON CONFLICT (tecido_id, estampa_id)
-            DO UPDATE SET sku = EXCLUDED.sku
+            DO UPDATE SET sku = EXCLUDED.sku, ativo = TRUE
             "#,
         )
         .bind(tecido_id)

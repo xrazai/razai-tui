@@ -92,9 +92,12 @@ Atalhos do detalhe do vinculo:
 - `Cima/Baixo`: alternar slot
 - `Tab`: proximo vinculo
 - `Shift+Tab`: vinculo anterior
-- `Enter`: abrir a janela nativa do Windows e escolher a imagem no computador
+- `[Desfazer Vinculo]`: pedir confirmacao para desativar o vinculo para novos lancamentos
+- `Enter`: abrir a janela nativa do Windows para imagem ou confirmar a acao selecionada
 
 Depois de salvar uma imagem, o sistema avanca automaticamente para o proximo slot vazio. Quando o vinculo atual fica completo, avanca para o proximo vinculo com imagens pendentes. O detalhe mostra o progresso no titulo (`Imagens n/4`) e o thumbnail do slot selecionado.
+
+`Desfazer Vinculo` apenas desativa o vinculo para novos lancamentos. Historico de vendas/pedidos permanece como estava, e o registro do vinculo com suas imagens continua preservado no banco.
 
 O preview usa `ratatui-image` com deteccao automatica de protocolo do terminal (`Sixel`, `Kitty`, `iTerm2` ou fallback `Halfblocks`). O protocolo ativo aparece no rodape do detalhe. Para forcar um protocolo, defina `RAZAI_IMAGE_PROTOCOL=auto|sixel|kitty|iterm2|halfblocks` antes de iniciar o app.
 

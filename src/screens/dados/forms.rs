@@ -207,6 +207,13 @@ pub(super) fn render_cadastrar_tecido(
             &form.largura,
             None,
         ),
+        format_field(
+            TecidoField::CustoBase,
+            form.selected_field,
+            "Custo base R$",
+            &form.custo_base,
+            None,
+        ),
     ];
     push_select(
         &mut fields,

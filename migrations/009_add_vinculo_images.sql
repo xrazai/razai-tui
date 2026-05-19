@@ -2,10 +2,12 @@ ALTER TABLE tecido_cores
     ADD COLUMN IF NOT EXISTS imagem_original BYTEA,
     ADD COLUMN IF NOT EXISTS imagem_brand BYTEA,
     ADD COLUMN IF NOT EXISTS imagem_modelo BYTEA,
-    ADD COLUMN IF NOT EXISTS imagem_alternativa BYTEA;
+    ADD COLUMN IF NOT EXISTS imagem_alternativa BYTEA,
+    ADD COLUMN IF NOT EXISTS ativo BOOLEAN NOT NULL DEFAULT TRUE;
 
 ALTER TABLE tecido_estampas
     ADD COLUMN IF NOT EXISTS imagem_original BYTEA,
     ADD COLUMN IF NOT EXISTS imagem_brand BYTEA,
     ADD COLUMN IF NOT EXISTS imagem_modelo BYTEA,
-    ADD COLUMN IF NOT EXISTS imagem_alternativa BYTEA;
+    ADD COLUMN IF NOT EXISTS imagem_alternativa BYTEA,
+    ADD COLUMN IF NOT EXISTS ativo BOOLEAN NOT NULL DEFAULT TRUE;

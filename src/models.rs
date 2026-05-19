@@ -115,6 +115,53 @@ pub enum VinculoImageSlot {
     Alternativa,
 }
 
+#[derive(Clone, Copy, Eq, PartialEq)]
+pub enum VinculoDetalheOption {
+    Slot(VinculoImageSlot),
+    Custo,
+    Desfazer,
+}
+
+impl Default for VinculoDetalheOption {
+    fn default() -> Self {
+        Self::Slot(VinculoImageSlot::Original)
+    }
+}
+
+impl VinculoDetalheOption {
+    pub const ALL: [Self; 6] = [
+        Self::Slot(VinculoImageSlot::Original),
+        Self::Slot(VinculoImageSlot::Brand),
+        Self::Slot(VinculoImageSlot::Modelo),
+        Self::Slot(VinculoImageSlot::Alternativa),
+        Self::Custo,
+        Self::Desfazer,
+    ];
+
+    pub fn next(self) -> Self {
+        Self::ALL[(self.index() + 1) % Self::ALL.len()]
+    }
+
+    pub fn previous(self) -> Self {
+        Self::ALL[(self.index() + Self::ALL.len() - 1) % Self::ALL.len()]
+    }
+
+    pub fn index(self) -> usize {
+        Self::ALL
+            .iter()
+            .position(|option| *option == self)
+            .unwrap_or(0)
+    }
+
+    pub fn selected_slot(self) -> Option<VinculoImageSlot> {
+        match self {
+            Self::Slot(slot) => Some(slot),
+            Self::Custo => None,
+            Self::Desfazer => None,
+        }
+    }
+}
+
 impl VinculoImageSlot {
     pub const ALL: [VinculoImageSlot; 4] = [
         VinculoImageSlot::Original,
@@ -139,14 +186,6 @@ impl VinculoImageSlot {
             VinculoImageSlot::Modelo => "modelo",
             VinculoImageSlot::Alternativa => "alternativa",
         }
-    }
-
-    pub fn next(self) -> Self {
-        Self::ALL[(self.index() + 1) % Self::ALL.len()]
-    }
-
-    pub fn previous(self) -> Self {
-        Self::ALL[(self.index() + Self::ALL.len() - 1) % Self::ALL.len()]
     }
 
     pub fn index(self) -> usize {
@@ -341,6 +380,7 @@ pub struct TecidoForm {
     pub nome: String,
     pub composicao: String,
     pub largura: String,
+    pub custo_base: String,
     pub tipo: SelectValue,
     pub transparencia: SelectValue,
     pub elasticidade: SelectValue,
@@ -405,6 +445,10 @@ impl TecidoForm {
             nome: tecido.nome.clone(),
             composicao: tecido.composicao.clone(),
             largura: format!("{:.2}m", tecido.largura_m),
+            custo_base: tecido
+                .custo_base
+                .map(|value| format!("{value:.2}"))
+                .unwrap_or_default(),
             tipo: SelectValue::from_value(&tecido.tipo, TIPO_OPTIONS),
             transparencia: SelectValue::from_value(&tecido.transparencia, NIVEL_OPTIONS),
             elasticidade: SelectValue::from_value(&tecido.elasticidade, NIVEL_OPTIONS),
@@ -429,6 +473,7 @@ impl TecidoForm {
             TecidoField::Nome => &mut self.nome,
             TecidoField::Composicao => &mut self.composicao,
             TecidoField::Largura => &mut self.largura,
+            TecidoField::CustoBase => &mut self.custo_base,
             TecidoField::Tipo
             | TecidoField::Transparencia
             | TecidoField::Elasticidade
@@ -459,6 +504,7 @@ pub enum TecidoField {
     Nome,
     Composicao,
     Largura,
+    CustoBase,
     Tipo,
     Transparencia,
     Elasticidade,
@@ -472,10 +518,11 @@ pub enum TecidoField {
 }
 
 impl TecidoField {
-    const ALL: [TecidoField; 13] = [
+    const ALL: [TecidoField; 14] = [
         TecidoField::Nome,
         TecidoField::Composicao,
         TecidoField::Largura,
+        TecidoField::CustoBase,
         TecidoField::Tipo,
         TecidoField::Transparencia,
         TecidoField::Elasticidade,

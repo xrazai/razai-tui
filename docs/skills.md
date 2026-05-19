@@ -7,7 +7,7 @@ O chat lateral usa um unico agente: **Razai Master**. A tela atual define apenas
 | Capacidade | Objetivo |
 | --- | --- |
 | `dashboard.master` | Consultar dados locais e preparar acoes de qualquer area com confirmacao. |
-| `dados.tecidos` | Criar, consultar e orientar cadastro de tecidos, incluindo SKU e calculos de rendimento/gramatura. |
+| `dados.tecidos` | Criar, consultar e orientar cadastro de tecidos, incluindo SKU, custo base e calculos de rendimento/gramatura. |
 | `dados.cores` | Criar e consultar cores, validando hexadecimal e SKU. |
 | `dados.estampas` | Criar e consultar estampas com SKU automatico. |
 | `dados.vinculos` | Criar e consultar vinculos entre tecido e cor/estampa. |
