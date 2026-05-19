@@ -28,6 +28,7 @@ use crate::{
 mod agent_actions;
 mod configuracoes;
 mod dados;
+mod documentos;
 mod pedidos;
 mod vendas;
 
@@ -125,6 +126,10 @@ pub struct App {
     pub shopee_update_confirm: bool,
     pub shopee_update_plans: Vec<shopee::ShopeeListingUpdatePlan>,
     pub shopee_status: String,
+    pub documentos_option: usize,
+    pub checklist_active: bool,
+    pub checklist_cursor: usize,
+    pub checklist_selected_tecidos: Vec<i64>,
     pub printers: Vec<String>,
     pub printer_option: usize,
     pub selected_printer: Option<String>,
@@ -245,6 +250,10 @@ impl App {
             shopee_update_confirm: false,
             shopee_update_plans: Vec::new(),
             shopee_status,
+            documentos_option: 0,
+            checklist_active: false,
+            checklist_cursor: 0,
+            checklist_selected_tecidos: Vec::new(),
             printers,
             printer_option,
             selected_printer,
@@ -333,6 +342,18 @@ impl App {
             self.handle_shopee_key(key.code);
             return;
         }
+        if self.section == Section::Documentos
+            && self.checklist_active
+            && key.code == KeyCode::Enter
+            && key.modifiers.contains(KeyModifiers::CONTROL)
+        {
+            self.save_checklist_shortcut();
+            return;
+        }
+        if self.section == Section::Documentos {
+            self.handle_documentos_key(key.code);
+            return;
+        }
         if self.section == Section::Configuracoes {
             self.handle_configuracoes_key(key.code);
             return;
@@ -355,7 +376,8 @@ impl App {
             KeyCode::Char('4') => self.section = Section::Dados,
             KeyCode::Char('5') => self.section = Section::Estoque,
             KeyCode::Char('6') => self.section = Section::Shopee,
-            KeyCode::Char('7') => self.section = Section::Configuracoes,
+            KeyCode::Char('7') => self.section = Section::Documentos,
+            KeyCode::Char('8') => self.section = Section::Configuracoes,
             KeyCode::Backspace if self.section == Section::Dados => {}
             KeyCode::Up if self.section == Section::Dados => match self.dados_screen {
                 DadosScreen::Menu => self.dados_option = self.dados_option.previous(),
@@ -1156,7 +1178,7 @@ impl App {
         let pedido_total = self.pedido_itens.iter().map(VendaItem::total).sum::<f64>();
 
         format!(
-            "Projeto Razai TUI: sistema terminal para loja de tecidos com Dashboard, Vendas, Pedidos, Dados, Estoque e Configuracoes. Tela atual: {}. Status: {}. Dados carregados: {} tecidos, {} cores, {} estampas, {} vendas no periodo {}..{}, {} pedidos. Tecidos: {}. Cores: {}. Estampas: {}. Vendas recentes: {}. Pedidos recentes: {}. Venda em andamento: {} itens, total R${}, preco='{}', quantidade='{}'. Pedido em andamento: {} itens, total R${}, preco='{}', quantidade='{}'. Impressora: {}. Formulario tecido: nome='{}', composicao='{}', largura='{}', tipo='{}'. Regras: gravacoes exigem confirmacao; vendas viram historico; pedidos geram PDF em pdf_pedidos e podem ser aprovados como venda.",
+            "Projeto Razai TUI: sistema terminal para loja de tecidos com Dashboard, Vendas, Pedidos, Dados, Estoque, Shopee, Documentos e Configuracoes. Tela atual: {}. Status: {}. Dados carregados: {} tecidos, {} cores, {} estampas, {} vendas no periodo {}..{}, {} pedidos. Tecidos: {}. Cores: {}. Estampas: {}. Vendas recentes: {}. Pedidos recentes: {}. Venda em andamento: {} itens, total R${}, preco='{}', quantidade='{}'. Pedido em andamento: {} itens, total R${}, preco='{}', quantidade='{}'. Impressora: {}. Formulario tecido: nome='{}', composicao='{}', largura='{}', tipo='{}'. Regras: gravacoes exigem confirmacao; vendas viram historico; pedidos geram PDF em pdf_pedidos e podem ser aprovados como venda; documentos geram checklist PDF em pdf_documentos.",
             self.section.title(),
             self.db_status,
             self.tecidos.len(),
@@ -1228,6 +1250,7 @@ impl App {
                 self.shopee_stock_confirm,
                 &self.shopee_status,
             ),
+            Section::Documentos => screens::documentos::render(frame, body[0], self),
             Section::Configuracoes => screens::configuracoes::render(frame, body[0], self),
             section => screens::chrome::render_content(frame, body[0], section),
         }

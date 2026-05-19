@@ -604,17 +604,19 @@ pub enum Section {
     Dados,
     Estoque,
     Shopee,
+    Documentos,
     Configuracoes,
 }
 
 impl Section {
-    pub const ALL: [Section; 7] = [
+    pub const ALL: [Section; 8] = [
         Section::Dashboard,
         Section::Vendas,
         Section::Pedidos,
         Section::Dados,
         Section::Estoque,
         Section::Shopee,
+        Section::Documentos,
         Section::Configuracoes,
     ];
 
@@ -626,6 +628,7 @@ impl Section {
             Section::Dados => "Dados",
             Section::Estoque => "Estoque",
             Section::Shopee => "Shopee",
+            Section::Documentos => "Documentos",
             Section::Configuracoes => "Configuracoes",
         }
     }
