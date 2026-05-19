@@ -119,21 +119,22 @@ Para conectar a loja, abra o link terminado em `/shopee/auth`. A rota `/shopee/c
 
 ### Estoque Online
 
-`Estoque Online` carrega os anuncios/modelos da Shopee, agrupa por SKU e exibe:
+`Estoque Online` carrega os anuncios/modelos da Shopee, agrupa primeiro por SKU Pai (`item_sku`) e exibe as variacoes (`model_sku`) dentro de cada pai:
 
-- SKU;
+- SKU Pai;
+- SKU da variacao;
 - quantidade de ocorrencias;
 - estoque atual somado;
 - modo selecionado para sincronizacao.
 
 Controles:
 
-- `Enter`: se ainda nao carregou, busca o estoque; se ja carregou, confirma sync do SKU selecionado.
-- `Cima/Baixo`: navega pelos SKUs carregados.
-- `Space`: alterna o SKU selecionado entre `Zerar 0` e `Ativar 100`.
+- `Enter`: se ainda nao carregou, busca o estoque; em SKU Pai, expande/recolhe; em variacao, confirma sync da variacao.
+- `Cima/Baixo`: navega por pais e variacoes visiveis.
+- `Space`: alterna a variacao selecionada entre `Zerar 0` e `Ativar 100`.
 - `R`: limpa a lista carregada para recarregar no proximo `Enter`.
 
-A sincronizacao altera apenas o SKU selecionado e exige confirmacao. Itens sem variacao usam `model_id=0`. Grupos multi-location ficam bloqueados para atualizacao automatica.
+A sincronizacao altera apenas a variacao selecionada e exige confirmacao. Itens sem variacao usam `model_id=0`. Grupos multi-location ficam bloqueados para atualizacao automatica.
 
 ### Criar Anuncio
 
