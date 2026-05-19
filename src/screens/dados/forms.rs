@@ -21,7 +21,12 @@ pub(super) fn render_cadastrar_cor(
     delta_e_threshold: f64,
     pending_delete: bool,
 ) {
-    let nearby = nearby_colors(&form.hex, cores, editing_id, delta_e_threshold);
+    let hex_complete = is_complete_hex_color(&form.hex);
+    let nearby = if hex_complete {
+        nearby_colors(&form.hex, cores, editing_id, delta_e_threshold)
+    } else {
+        Vec::new()
+    };
     let lines = vec![
         format_cor_hex_field(CorField::Hex, form.selected_field, "Hex", &form.hex),
         format_cor_field(
@@ -53,7 +58,7 @@ pub(super) fn render_cadastrar_cor(
         .direction(Direction::Horizontal)
         .constraints([Constraint::Min(40), Constraint::Length(SIDE_PANEL_WIDTH)])
         .split(area);
-    let proximity_lines = if parse_hex_color(&form.hex).is_some() {
+    let proximity_lines = if hex_complete {
         let mut lines = vec![Line::from(vec![
             Span::raw("Limiar Delta E: "),
             Span::styled(
@@ -83,7 +88,7 @@ pub(super) fn render_cadastrar_cor(
         }
         lines
     } else {
-        vec![Line::from("Digite um HEX valido para buscar cores proximas.")]
+        Vec::new()
     };
     let sku = Paragraph::new(Text::from(vec![
         Line::from(form.sku(cores, editing_id)),
