@@ -24,18 +24,25 @@ pub fn parse_sales_date(value: &str) -> Option<NaiveDate> {
 }
 
 pub async fn insert_venda(pool: &PgPool, itens: &[VendaItem]) -> Result<i64, sqlx::Error> {
-    let total = itens.iter().map(VendaItem::total).sum::<f64>();
     let mut transaction = pool.begin().await?;
+    let venda_id = insert_venda_in_transaction(&mut transaction, itens).await?;
+    transaction.commit().await?;
+    Ok(venda_id)
+}
 
+pub(crate) async fn insert_venda_in_transaction(
+    transaction: &mut sqlx::Transaction<'_, sqlx::Postgres>,
+    itens: &[VendaItem],
+) -> Result<i64, sqlx::Error> {
+    let total = itens.iter().map(VendaItem::total).sum::<f64>();
     let row = sqlx::query("INSERT INTO vendas (total) VALUES ($1::numeric) RETURNING id")
         .bind(total)
-        .fetch_one(&mut *transaction)
+        .fetch_one(&mut **transaction)
         .await?;
     let venda_id: i64 = row.get("id");
 
-    insert_venda_itens(&mut transaction, venda_id, itens).await?;
-    crate::db::reset_sale_stock_movements(&mut transaction, venda_id, itens).await?;
-    transaction.commit().await?;
+    insert_venda_itens(transaction, venda_id, itens).await?;
+    crate::db::reset_sale_stock_movements(transaction, venda_id, itens).await?;
     Ok(venda_id)
 }
 

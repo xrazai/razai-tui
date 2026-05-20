@@ -802,15 +802,15 @@ fn render_vinculo_detalhe(frame: &mut Frame, area: Rect, app: &App) {
     );
 
     if app.pending_unlink_vinculo {
-        render_destructive_confirm_dialog(
-            frame,
-            area,
-            "Desfazer vinculo",
-            &format!(
+        let warning = if app.vinculo_unlink_warning.is_empty() {
+            format!(
                 "Desfazer vinculo de {} / {}?\nEle deixara de aparecer para novos lancamentos. Historico e imagens permanecem no banco.",
                 vinculo.tecido_nome, vinculo.cor_nome
-            ),
-        );
+            )
+        } else {
+            app.vinculo_unlink_warning.clone()
+        };
+        render_destructive_confirm_dialog(frame, area, "Desfazer vinculo", &warning);
     }
 }
 

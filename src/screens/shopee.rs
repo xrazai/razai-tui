@@ -250,6 +250,13 @@ fn render_stock_groups(
     let mut selected_row = 0usize;
     let mut rows = Vec::new();
     for parent in groups {
+        if !rows.is_empty() {
+            rows.push(Line::from(Span::styled(
+                "─".repeat(area.width.saturating_sub(4).max(20) as usize),
+                Style::default().fg(Color::DarkGray),
+            )));
+            row_index += 1;
+        }
         let parent_cursor = cursor;
         cursor += 1;
         let current = parent_cursor == selected_cursor;
@@ -261,16 +268,32 @@ fn render_stock_groups(
             Span::styled(if current { "> " } else { "  " }, selected_style(current)),
             Span::styled(marker, Style::default().fg(Color::Cyan)),
             Span::raw(" "),
-            Span::styled(parent.sku.clone(), Style::default().fg(Color::Yellow)),
+            Span::styled(
+                format!("{:<12}", parent.sku),
+                Style::default().fg(Color::Yellow),
+            ),
             Span::raw(format!(
-                " | {} variacoes | atual {} | {}",
+                " {:<28} {:>3} variacoes  remoto {:>5}",
+                truncate_text(&parent.name, 28),
                 parent.groups.len(),
-                parent.total_current_stock,
-                parent.name
+                parent.total_current_stock
             )),
         ]));
         row_index += 1;
         if parent.expanded {
+            rows.push(Line::from(vec![
+                Span::raw("      "),
+                Span::styled(
+                    format!("{:<18}", "Variacao"),
+                    Style::default().fg(Color::Gray),
+                ),
+                Span::styled(format!("{:>8}", "Remoto"), Style::default().fg(Color::Gray)),
+                Span::styled(format!("{:>8}", "Alvo"), Style::default().fg(Color::Gray)),
+                Span::styled(format!("{:>8}", "Disp."), Style::default().fg(Color::Gray)),
+                Span::styled(format!("{:>8}", "Res."), Style::default().fg(Color::Gray)),
+                Span::raw("  Status"),
+            ]));
+            row_index += 1;
             for group in &parent.groups {
                 let child_cursor = cursor;
                 cursor += 1;
@@ -278,34 +301,49 @@ fn render_stock_groups(
                 if current {
                     selected_row = row_index;
                 }
-                let warning = group
-                    .warning
-                    .as_deref()
-                    .map(|warning| format!(" | {warning}"))
-                    .unwrap_or_default();
+                let occurrence = group.occurrences.first();
+                let available = occurrence.map(|item| item.available_stock).unwrap_or(0);
+                let reserved = occurrence.map(|item| item.reserved_stock).unwrap_or(0);
+                let status = stock_status_label(group);
+                let status_style = stock_status_style(group);
+                let target_style = if group.target_stock == 0 {
+                    Style::default().fg(Color::Red).bold()
+                } else {
+                    Style::default().fg(Color::Green).bold()
+                };
                 rows.push(Line::from(vec![
                     Span::styled(if current { "> " } else { "  " }, selected_style(current)),
                     Span::raw("    "),
-                    Span::styled(group.sku.clone(), Style::default().fg(Color::Green)),
-                    Span::raw(format!(
-                        " | {} ocorr. | atual {} | {}{}",
-                        group.occurrences.len(),
-                        group.total_current_stock,
-                        group.target_label(),
-                        warning
-                    )),
+                    Span::styled(
+                        format!("{:<18}", truncate_text(&group.sku, 18)),
+                        Style::default().fg(Color::Green),
+                    ),
+                    Span::raw(format!("{:>8}", group.total_current_stock)),
+                    Span::styled(format!("{:>8}", group.target_stock), target_style),
+                    Span::raw(format!("{available:>8}{reserved:>8}  ")),
+                    Span::styled(status, status_style),
                 ]));
                 row_index += 1;
-                if let Some(occurrence) = group.occurrences.first() {
-                    rows.push(Line::from(format!(
-                        "       Ex: item {} model {} | seller {} disp {} res {}",
-                        occurrence.item_id,
-                        occurrence.model_id,
-                        occurrence.seller_stock,
-                        occurrence.available_stock,
-                        occurrence.reserved_stock
-                    )));
-                    row_index += 1;
+                if current {
+                    let mut detail_rows = 0usize;
+                    if let Some(occurrence) = occurrence {
+                        rows.push(Line::from(format!(
+                            "       item {}  model {}  seller {}  ocorrencias {}",
+                            occurrence.item_id,
+                            occurrence.model_id,
+                            occurrence.seller_stock,
+                            group.occurrences.len()
+                        )));
+                        detail_rows += 1;
+                    }
+                    if let Some(warning) = &group.warning {
+                        rows.push(Line::from(vec![
+                            Span::raw("       "),
+                            Span::styled(warning.clone(), Style::default().fg(Color::Red)),
+                        ]));
+                        detail_rows += 1;
+                    }
+                    row_index += detail_rows;
                 }
             }
         }
@@ -318,7 +356,7 @@ fn render_stock_groups(
         .saturating_sub(visible_rows)
         .min(rows.len().saturating_sub(visible_rows));
     let title = format!(
-        "Shopee > Estoque Online | Enter expande/sync | Space 0/100 | R recarregar | {}/{}",
+        "Shopee > Estoque Online | Enter expande/sync | Space 0/100 | C reconciliar | R recarregar | {}/{}",
         selected_cursor.saturating_add(1).min(cursor.max(1)),
         cursor.max(1)
     );
@@ -327,4 +365,45 @@ fn render_stock_groups(
         .scroll((scroll_offset as u16, 0))
         .wrap(Wrap { trim: false });
     frame.render_widget(widget, area);
+}
+
+fn stock_status_label(group: &crate::shopee::ShopeeStockGroup) -> &'static str {
+    if group.warning.is_some() {
+        "bloqueado"
+    } else if group.target_stock == 0 && group.total_current_stock == 0 {
+        "zerado"
+    } else if group.target_stock == 0 {
+        "zerar pendente"
+    } else if group.total_current_stock == group.target_stock {
+        "ativo"
+    } else {
+        "sync pendente"
+    }
+}
+
+fn stock_status_style(group: &crate::shopee::ShopeeStockGroup) -> Style {
+    if group.warning.is_some() {
+        Style::default().fg(Color::Red).bold()
+    } else if group.target_stock == 0 && group.total_current_stock == 0 {
+        Style::default().fg(Color::Gray)
+    } else if group.target_stock == 0 {
+        Style::default().fg(Color::Red).bold()
+    } else if group.total_current_stock == group.target_stock {
+        Style::default().fg(Color::Green).bold()
+    } else {
+        Style::default().fg(Color::Yellow).bold()
+    }
+}
+
+fn truncate_text(text: &str, max_len: usize) -> String {
+    let char_count = text.chars().count();
+    if char_count <= max_len {
+        return text.to_string();
+    }
+    if max_len <= 1 {
+        return String::from("~");
+    }
+    let mut output = text.chars().take(max_len - 1).collect::<String>();
+    output.push('~');
+    output
 }

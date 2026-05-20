@@ -106,7 +106,7 @@ fn render_ordens(
     ordens: &[EstoqueOrdemRecord],
 ) {
     let items = if ordens.is_empty() {
-        vec![ListItem::new("Nenhuma ordem de estoque pendente.")]
+        vec![ListItem::new("Nenhuma ordem de estoque cadastrada.")]
     } else {
         let mut items = vec![ListItem::new(Line::from(format!(
             "{} {} {} {} {} {} {}",
@@ -220,7 +220,7 @@ fn render_mais_vendidos(frame: &mut Frame, area: ratatui::layout::Rect, app: &Ap
         .fold(0.0, f64::max);
     let mut lines = Vec::new();
     if app.estoque_mais_vendidos.is_empty() {
-        lines.push(Line::from("Nenhuma venda encontrada no periodo."));
+        lines.push(Line::from("Nenhuma venda encontrada."));
     } else {
         lines.extend(
             app.estoque_mais_vendidos
@@ -305,7 +305,7 @@ fn render_ordem_detalhe(frame: &mut Frame, area: ratatui::layout::Rect, app: &Ap
         render_ordens(frame, area, app.estoque_ordem_option, &app.estoque_ordens);
         return;
     };
-    let lines = vec![
+    let mut lines = vec![
         Line::from(vec![
             Span::styled(
                 ordem.sku.as_deref().unwrap_or("sem-sku").to_string(),
@@ -337,11 +337,17 @@ fn render_ordem_detalhe(frame: &mut Frame, area: ratatui::layout::Rect, app: &Ap
             ordem.observacao.as_deref().unwrap_or("-")
         )),
         Line::from(""),
-        action_line(0, app.estoque_ordem_action_option, "[Fornecedor]"),
-        action_line(1, app.estoque_ordem_action_option, "[Concluir]"),
-        action_line(2, app.estoque_ordem_action_option, "[Cancelar]"),
-        action_line(3, app.estoque_ordem_action_option, "[Voltar]"),
     ];
+    if matches!(ordem.status.as_str(), "pendente" | "direcionada") {
+        lines.extend([
+            action_line(0, app.estoque_ordem_action_option, "[Fornecedor]"),
+            action_line(1, app.estoque_ordem_action_option, "[Concluir]"),
+            action_line(2, app.estoque_ordem_action_option, "[Cancelar]"),
+            action_line(3, app.estoque_ordem_action_option, "[Voltar]"),
+        ]);
+    } else {
+        lines.push(action_line(0, app.estoque_ordem_action_option, "[Voltar]"));
+    }
     let widget = Paragraph::new(Text::from(lines)).block(
         Block::default()
             .title("Estoque > Ordem")
@@ -594,9 +600,5 @@ fn format_money(value: f64) -> String {
 }
 
 fn format_quantity(value: f64) -> String {
-    if value.fract() == 0.0 {
-        format!("{value:.0}")
-    } else {
-        format!("{value:.3}").replace('.', ",")
-    }
+    format_money(value)
 }

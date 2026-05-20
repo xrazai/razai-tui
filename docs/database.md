@@ -40,9 +40,10 @@ Tabelas principais:
 - `pedidos` e `pedido_itens`: pedidos pendentes/aprovados, PDF salvo e itens com identidade de estoque.
 - `estoque_movimentacoes`: fonte de verdade do saldo de estoque por vinculo.
 - `estoque_ordens`: pendencias automaticas de falta de estoque para direcionamento a fornecedor.
+- `shopee_stock_policies`: alvos persistidos de estoque online por item/modelo Shopee.
 - `configuracoes`: configuracoes locais persistidas no banco, como impressora de recibos e limiar Delta E de cores.
 
-O app tambem garante em runtime as tabelas e colunas recentes, como `fornecedores`, `configuracoes`, `estampas`, `tecido_estampas`, `estoque_movimentacoes`, `estoque_ordens`, `tecidos.fornecedor_id`, `tecidos.custo_base`, `tecidos.preco_atacado`, `tecidos.preco_varejo`, `custo_override` e overrides de preco nos vinculos, porque bancos locais antigos podem ter sido criados antes dessas migrations.
+O app tambem garante em runtime as tabelas e colunas recentes, como `fornecedores`, `configuracoes`, `estampas`, `tecido_estampas`, `estoque_movimentacoes`, `estoque_ordens`, `shopee_stock_policies`, `tecidos.fornecedor_id`, `tecidos.custo_base`, `tecidos.preco_atacado`, `tecidos.preco_varejo`, `custo_override` e overrides de preco nos vinculos, porque bancos locais antigos podem ter sido criados antes dessas migrations.
 
 ## Estoque
 
@@ -105,6 +106,20 @@ No startup e antes de chamadas Shopee, o app:
 - persiste tokens renovados no banco e no `.env`.
 
 Valores reais de `SHOPEE_PARTNER_KEY`, tokens e authtokens de tunel nunca devem ser commitados.
+
+`shopee_stock_policies` guarda a politica local para manter estoque online em um alvo:
+
+| Coluna | Uso |
+| --- | --- |
+| `item_id`, `model_id` | Identidade remota da variacao. Itens sem variacao usam `model_id = 0`. |
+| `sku`, `parent_sku` | SKUs normalizados para exibicao e reconciliacao. |
+| `target_stock` | Alvo local salvo pela tela Shopee, normalmente `0` ou `100`. |
+| `enabled` | Define se a politica participa da reconciliacao. |
+| `last_remote_stock` | Ultimo estoque remoto observado pelo app. |
+| `last_synced_at` | Ultimo sync/reconciliacao bem-sucedido. |
+| `last_error` | Ultimo erro de sync, quando houver. |
+
+A reconciliacao consulta a Shopee antes de chamar `product/update_stock`; o webhook `/shopee/push` apenas dispara essa reconciliacao. Isso evita confiar em payload de push como fonte de estoque.
 
 Se precisar recriar o banco do zero:
 

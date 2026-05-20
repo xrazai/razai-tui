@@ -14,7 +14,7 @@ use crate::{
 pub fn render(frame: &mut Frame, area: Rect, app: &App) {
     let chunks = Layout::default()
         .direction(Direction::Vertical)
-        .constraints([Constraint::Min(8), Constraint::Length(5)])
+        .constraints([Constraint::Min(8), Constraint::Length(7)])
         .split(area);
 
     if app.checklist_active {
@@ -66,6 +66,9 @@ fn render_checklist(frame: &mut Frame, area: Rect, app: &App) {
             ]))
         })
         .collect::<Vec<_>>();
+    if app.tecidos.is_empty() {
+        items.push(ListItem::new("Nenhum tecido cadastrado."));
+    }
 
     let action_start = items.len();
     items.push(ListItem::new(""));

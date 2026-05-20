@@ -229,9 +229,9 @@ Para conectar a loja, abra o link terminado em `/shopee/auth`. A rota `/shopee/c
 
 - SKU Pai;
 - SKU da variacao;
-- quantidade de ocorrencias;
-- estoque atual somado;
-- modo selecionado para sincronizacao.
+- estoque remoto, disponivel e reservado;
+- alvo local persistido (`0` ou `100`);
+- status visual (`zerado`, `zerar pendente`, `ativo`, `sync pendente` ou `bloqueado`).
 
 Para acelerar lojas com muitos anuncios, os detalhes dos itens e as variacoes sao buscados em paralelo com concorrencia controlada.
 
@@ -239,10 +239,13 @@ Controles:
 
 - `Enter`: se ainda nao carregou, busca o estoque; em SKU Pai, expande/recolhe; em variacao, confirma sync da variacao.
 - `Cima/Baixo`: navega por pais e variacoes visiveis.
-- `Space`: alterna a variacao selecionada entre `Zerar 0` e `Ativar 100`.
+- `Space`: alterna a variacao selecionada entre alvo `0` e alvo `100` e salva essa politica no banco local.
+- `C`: reconcilia agora todas as politicas Shopee ativas, consultando o estoque remoto e reenviando `update_stock` quando o remoto divergir do alvo local.
 - `R`: limpa a lista carregada para recarregar no proximo `Enter`.
 
-A sincronizacao altera apenas a variacao selecionada e exige confirmacao. Itens sem variacao usam `model_id=0`. Grupos multi-location ficam bloqueados para atualizacao automatica.
+A sincronizacao manual por `Enter` altera apenas a variacao selecionada e exige confirmacao. Itens sem variacao usam `model_id=0`. Grupos multi-location ficam bloqueados para atualizacao automatica.
+
+As politicas ficam em `shopee_stock_policies`. O webhook `/shopee/push` e tratado como gatilho de reconciliacao: ao receber push, o app consulta novamente a Shopee e reaplica os alvos salvos quando necessario. Para isso funcionar, o app precisa estar aberto, com callback/ngrok ativo e a URL de push cadastrada na Shopee.
 
 ### Atualizar Anuncios
 

@@ -9,6 +9,20 @@ impl App {
             KeyCode::Esc => self.voltar_estoque(),
             KeyCode::Up => self.previous_estoque_option(),
             KeyCode::Down => self.next_estoque_option(),
+            KeyCode::Left
+                if self.estoque_screen == EstoqueScreen::Lista
+                    && self.estoque_view == EstoqueView::ResumoFornecedor
+                    && self.estoque_resumo_field == 0 =>
+            {
+                self.previous_estoque_resumo_fornecedor()
+            }
+            KeyCode::Right
+                if self.estoque_screen == EstoqueScreen::Lista
+                    && self.estoque_view == EstoqueView::ResumoFornecedor
+                    && self.estoque_resumo_field == 0 =>
+            {
+                self.next_estoque_resumo_fornecedor()
+            }
             KeyCode::Left => self.section = self.section.previous(),
             KeyCode::Right => self.section = self.section.next(),
             KeyCode::Backspace => self.backspace_estoque_field(),
@@ -103,7 +117,8 @@ impl App {
                 self.skip_destino_for_entrada();
             }
             EstoqueScreen::OrdemDetalhe => {
-                self.estoque_ordem_action_option = (self.estoque_ordem_action_option + 1) % 4;
+                self.estoque_ordem_action_option =
+                    (self.estoque_ordem_action_option + 1) % self.estoque_ordem_action_count();
             }
             EstoqueScreen::OrdemFornecedor if !self.fornecedores.is_empty() => {
                 self.estoque_ordem_fornecedor_option =
@@ -143,7 +158,9 @@ impl App {
                 self.skip_destino_for_entrada();
             }
             EstoqueScreen::OrdemDetalhe => {
-                self.estoque_ordem_action_option = (self.estoque_ordem_action_option + 3) % 4;
+                let action_count = self.estoque_ordem_action_count();
+                self.estoque_ordem_action_option =
+                    (self.estoque_ordem_action_option + action_count - 1) % action_count;
             }
             EstoqueScreen::OrdemFornecedor if !self.fornecedores.is_empty() => {
                 self.estoque_ordem_fornecedor_option =
@@ -204,12 +221,7 @@ impl App {
                 EstoqueMovimentoField::Voltar => self.voltar_estoque(),
                 _ => self.next_estoque_option(),
             },
-            EstoqueScreen::OrdemDetalhe => match self.estoque_ordem_action_option {
-                0 => self.open_estoque_ordem_fornecedor(),
-                1 => self.update_estoque_ordem_status("concluida"),
-                2 => self.update_estoque_ordem_status("cancelada"),
-                _ => self.voltar_estoque(),
-            },
+            EstoqueScreen::OrdemDetalhe => self.enter_estoque_ordem_detalhe(),
             EstoqueScreen::OrdemFornecedor => self.direcionar_estoque_ordem(),
             _ => {}
         }
@@ -349,28 +361,34 @@ impl App {
     }
 
     fn next_estoque_resumo_field(&mut self) {
-        if self.estoque_resumo_field == 0 && !self.fornecedores.is_empty() {
-            self.estoque_resumo_fornecedor_option =
-                (self.estoque_resumo_fornecedor_option + 1) % self.fornecedores.len();
-            self.reload_estoque_resumo_fornecedor();
-        } else {
-            self.estoque_resumo_field = (self.estoque_resumo_field + 1) % 3;
-        }
+        self.estoque_resumo_field = (self.estoque_resumo_field + 1) % 3;
     }
 
     fn previous_estoque_resumo_field(&mut self) {
-        if self.estoque_resumo_field == 0 && !self.fornecedores.is_empty() {
+        self.estoque_resumo_field = (self.estoque_resumo_field + 2) % 3;
+    }
+
+    fn next_estoque_resumo_fornecedor(&mut self) {
+        if !self.fornecedores.is_empty() {
+            self.estoque_resumo_fornecedor_option =
+                (self.estoque_resumo_fornecedor_option + 1) % self.fornecedores.len();
+            self.reload_estoque_resumo_fornecedor();
+        }
+    }
+
+    fn previous_estoque_resumo_fornecedor(&mut self) {
+        if !self.fornecedores.is_empty() {
             self.estoque_resumo_fornecedor_option =
                 (self.estoque_resumo_fornecedor_option + self.fornecedores.len() - 1)
                     % self.fornecedores.len();
             self.reload_estoque_resumo_fornecedor();
-        } else {
-            self.estoque_resumo_field = (self.estoque_resumo_field + 2) % 3;
         }
     }
 
     fn enter_estoque_resumo_fornecedor(&mut self) {
-        if self.estoque_resumo_field < 2 {
+        if matches!(self.estoque_resumo_field, 1 | 2) {
+            self.open_date_range_picker(DateRangeTarget::EstoqueResumoFornecedor);
+        } else if self.estoque_resumo_field < 2 {
             self.estoque_resumo_field += 1;
         } else {
             self.estoque_resumo_field = 0;
@@ -378,17 +396,30 @@ impl App {
         self.reload_estoque_resumo_fornecedor();
     }
 
-    fn reload_estoque_resumo_fornecedor(&mut self) {
+    pub(super) fn reload_estoque_resumo_fornecedor(&mut self) {
         let Some(pool) = &self.db_pool else {
+            self.db_status = String::from("Banco local indisponivel para estoque.");
             return;
         };
         let Some(fornecedor) = self.fornecedores.get(self.estoque_resumo_fornecedor_option) else {
             self.estoque_resumo_fornecedor.clear();
             return;
         };
-        let inicio =
-            db::parse_sales_date(&self.estoque_resumo_inicio).unwrap_or_else(db::today_sales_date);
-        let fim = db::parse_sales_date(&self.estoque_resumo_fim).unwrap_or(inicio);
+        let Some(mut inicio) = db::parse_sales_date(&self.estoque_resumo_inicio) else {
+            self.estoque_resumo_fornecedor.clear();
+            self.db_status = String::from("Data inicial invalida. Use AAAA-MM-DD.");
+            return;
+        };
+        let Some(mut fim) = db::parse_sales_date(&self.estoque_resumo_fim) else {
+            self.estoque_resumo_fornecedor.clear();
+            self.db_status = String::from("Data final invalida. Use AAAA-MM-DD.");
+            return;
+        };
+        if fim < inicio {
+            std::mem::swap(&mut inicio, &mut fim);
+            self.estoque_resumo_inicio = inicio.format("%Y-%m-%d").to_string();
+            self.estoque_resumo_fim = fim.format("%Y-%m-%d").to_string();
+        }
         match self.db_runtime.block_on(db::list_fornecedor_resumo_vendas(
             pool,
             fornecedor.id,
@@ -402,6 +433,7 @@ impl App {
 
     fn reload_estoque_mais_vendidos(&mut self) {
         let Some(pool) = &self.db_pool else {
+            self.db_status = String::from("Banco local indisponivel para estoque.");
             return;
         };
         match self.db_runtime.block_on(db::list_mais_vendidos(pool)) {
@@ -411,6 +443,10 @@ impl App {
     }
 
     fn open_estoque_ordem_fornecedor(&mut self) {
+        if !self.estoque_ordem_selected_is_active() {
+            self.db_status = String::from("Ordem encerrada nao pode ser direcionada.");
+            return;
+        }
         self.reload_fornecedores();
         if self.fornecedores.is_empty() {
             self.db_status = String::from("Cadastre um fornecedor em Dados > Fornecedor.");
@@ -445,7 +481,7 @@ impl App {
             .db_runtime
             .block_on(db::direcionar_estoque_ordem(pool, ordem.id, fornecedor.id))
         {
-            Ok(()) => {
+            Ok(true) => {
                 let ordem_id = ordem.id;
                 self.reload_estoque_ordens();
                 if let Some(index) = self
@@ -457,6 +493,11 @@ impl App {
                 }
                 self.estoque_screen = EstoqueScreen::OrdemDetalhe;
                 self.db_status = String::from("Ordem direcionada para fornecedor.");
+            }
+            Ok(false) => {
+                self.reload_estoque_ordens();
+                self.estoque_screen = EstoqueScreen::OrdemDetalhe;
+                self.db_status = String::from("Ordem encerrada nao pode ser direcionada.");
             }
             Err(error) => self.db_status = format!("Erro ao direcionar ordem: {error}"),
         }
@@ -474,7 +515,7 @@ impl App {
             .db_runtime
             .block_on(db::update_estoque_ordem_status(pool, ordem.id, status))
         {
-            Ok(()) => {
+            Ok(true) => {
                 let ordem_id = ordem.id;
                 self.reload_estoque_ordens();
                 if let Some(index) = self
@@ -489,8 +530,40 @@ impl App {
                 }
                 self.db_status = format!("Ordem marcada como {status}.");
             }
+            Ok(false) => {
+                self.reload_estoque_ordens();
+                self.estoque_ordem_action_option = 0;
+                self.db_status = String::from("Ordem encerrada nao pode ser alterada.");
+            }
             Err(error) => self.db_status = format!("Erro ao atualizar ordem: {error}"),
         }
+    }
+
+    fn enter_estoque_ordem_detalhe(&mut self) {
+        if self.estoque_ordem_selected_is_active() {
+            match self.estoque_ordem_action_option {
+                0 => self.open_estoque_ordem_fornecedor(),
+                1 => self.update_estoque_ordem_status("concluida"),
+                2 => self.update_estoque_ordem_status("cancelada"),
+                _ => self.voltar_estoque(),
+            }
+        } else {
+            self.voltar_estoque();
+        }
+    }
+
+    fn estoque_ordem_action_count(&self) -> usize {
+        if self.estoque_ordem_selected_is_active() {
+            4
+        } else {
+            1
+        }
+    }
+
+    fn estoque_ordem_selected_is_active(&self) -> bool {
+        self.estoque_ordens
+            .get(self.estoque_ordem_option)
+            .is_some_and(|ordem| matches!(ordem.status.as_str(), "pendente" | "direcionada"))
     }
 }
 

@@ -63,6 +63,11 @@ pub async fn ensure_fornecedores_table(pool: &PgPool) -> Result<(), sqlx::Error>
     )
     .execute(pool)
     .await?;
+    sqlx::query(
+        "ALTER TABLE fornecedores ADD COLUMN IF NOT EXISTS ativo BOOLEAN NOT NULL DEFAULT TRUE",
+    )
+    .execute(pool)
+    .await?;
 
     Ok(())
 }
@@ -82,6 +87,9 @@ pub async fn ensure_tecido_custo_base_column(pool: &PgPool) -> Result<(), sqlx::
     )
     .execute(pool)
     .await?;
+    sqlx::query("ALTER TABLE tecidos ADD COLUMN IF NOT EXISTS ativo BOOLEAN NOT NULL DEFAULT TRUE")
+        .execute(pool)
+        .await?;
 
     Ok(())
 }
@@ -451,6 +459,7 @@ pub async fn list_tecidos(pool: &PgPool) -> Result<Vec<TecidoRecord>, sqlx::Erro
             WHERE ativo = TRUE
             GROUP BY tecido_id
         ) te_counts ON te_counts.tecido_id = tecidos.id
+        WHERE tecidos.ativo = TRUE
         ORDER BY nome, id
         "#,
     )
@@ -597,7 +606,7 @@ pub async fn update_tecido(
 }
 
 pub async fn delete_tecido(pool: &PgPool, id: i64) -> Result<(), sqlx::Error> {
-    sqlx::query("DELETE FROM tecidos WHERE id = $1")
+    sqlx::query("UPDATE tecidos SET ativo = FALSE WHERE id = $1")
         .bind(id)
         .execute(pool)
         .await?;
@@ -667,9 +676,14 @@ pub async fn delete_cor(pool: &PgPool, id: i64) -> Result<(), sqlx::Error> {
 pub async fn list_fornecedores(pool: &PgPool) -> Result<Vec<FornecedorRecord>, sqlx::Error> {
     let rows = sqlx::query(
         r#"
-        SELECT id, nome, empresa, telefone, endereco
+        SELECT
+            id,
+            CASE WHEN ativo THEN nome ELSE nome || ' (arquivado)' END AS nome,
+            empresa,
+            telefone,
+            endereco
         FROM fornecedores
-        ORDER BY nome, id
+        ORDER BY ativo DESC, nome, id
         "#,
     )
     .fetch_all(pool)
@@ -728,7 +742,7 @@ pub async fn update_fornecedor(
 }
 
 pub async fn delete_fornecedor(pool: &PgPool, id: i64) -> Result<(), sqlx::Error> {
-    sqlx::query("DELETE FROM fornecedores WHERE id = $1")
+    sqlx::query("UPDATE fornecedores SET ativo = FALSE WHERE id = $1")
         .bind(id)
         .execute(pool)
         .await?;
@@ -1074,6 +1088,28 @@ pub async fn deactivate_vinculo(
     .await?;
 
     Ok(())
+}
+
+pub async fn get_vinculo_stock_balance(
+    pool: &PgPool,
+    tecido_id: i64,
+    item_id: i64,
+    usa_estampas: bool,
+) -> Result<f64, sqlx::Error> {
+    let saldo = sqlx::query_scalar(
+        r#"
+        SELECT COALESCE(SUM(quantidade), 0)::float8
+        FROM estoque_movimentacoes
+        WHERE tecido_id = $1 AND item_id = $2 AND usa_estampas = $3
+        "#,
+    )
+    .bind(tecido_id)
+    .bind(item_id)
+    .bind(usa_estampas)
+    .fetch_one(pool)
+    .await?;
+
+    Ok(saldo)
 }
 
 pub async fn replace_vinculos(

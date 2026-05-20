@@ -15,7 +15,7 @@ use reqwest::StatusCode;
 use serde::{Deserialize, Serialize};
 use serde_json::{Value, json};
 use sha2::Sha256;
-use sqlx::PgPool;
+use sqlx::{PgPool, Row};
 
 use crate::db;
 use crate::db::{TecidoRecord, VinculoRecord};
@@ -95,6 +95,15 @@ pub struct ShopeeStockSyncResult {
 }
 
 #[derive(Clone, Debug)]
+pub struct ShopeeStockPolicy {
+    pub item_id: i64,
+    pub model_id: i64,
+    pub sku: String,
+    pub parent_sku: String,
+    pub target_stock: i64,
+}
+
+#[derive(Clone, Debug)]
 pub struct ShopeeListingResult {
     pub item_id: i64,
     pub sku: String,
@@ -151,6 +160,31 @@ impl ShopeeStockGroup {
     pub fn toggle_target(&mut self) {
         self.target_stock = if self.target_stock == 0 { 100 } else { 0 };
     }
+}
+
+pub async fn ensure_shopee_tables(pool: &PgPool) -> Result<(), sqlx::Error> {
+    sqlx::query(
+        r#"
+        CREATE TABLE IF NOT EXISTS shopee_stock_policies (
+            item_id BIGINT NOT NULL,
+            model_id BIGINT NOT NULL DEFAULT 0,
+            sku TEXT NOT NULL,
+            parent_sku TEXT NOT NULL DEFAULT '',
+            target_stock BIGINT NOT NULL DEFAULT 0,
+            enabled BOOLEAN NOT NULL DEFAULT TRUE,
+            last_remote_stock BIGINT,
+            last_synced_at TIMESTAMPTZ,
+            last_error TEXT,
+            created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+            updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+            PRIMARY KEY (item_id, model_id)
+        )
+        "#,
+    )
+    .execute(pool)
+    .await?;
+
+    Ok(())
 }
 
 #[derive(Debug, Deserialize)]
@@ -312,10 +346,15 @@ pub async fn fetch_online_stock_groups(
     let config = ShopeeConfig::from_env()?;
     let tokens = ensure_connected_with_config(pool, &config).await?;
     match fetch_online_stock_groups_with_tokens(&config, &tokens).await {
-        Ok(groups) => Ok(groups),
+        Ok(mut groups) => {
+            apply_saved_stock_policies(pool, &mut groups).await?;
+            Ok(groups)
+        }
         Err(error) if error.is_token_error() => {
             let tokens = refresh_tokens(pool, &config, &tokens).await?;
-            fetch_online_stock_groups_with_tokens(&config, &tokens).await
+            let mut groups = fetch_online_stock_groups_with_tokens(&config, &tokens).await?;
+            apply_saved_stock_policies(pool, &mut groups).await?;
+            Ok(groups)
         }
         Err(error) => Err(error),
     }
@@ -327,11 +366,44 @@ pub async fn sync_stock_groups(
 ) -> Result<ShopeeStockSyncResult, ShopeeError> {
     let config = ShopeeConfig::from_env()?;
     let tokens = ensure_connected_with_config(pool, &config).await?;
-    match sync_stock_groups_with_tokens(&config, &tokens, groups).await {
+    match sync_stock_groups_with_tokens(pool, &config, &tokens, groups).await {
         Ok(result) => Ok(result),
         Err(error) if error.is_token_error() => {
             let tokens = refresh_tokens(pool, &config, &tokens).await?;
-            sync_stock_groups_with_tokens(&config, &tokens, groups).await
+            sync_stock_groups_with_tokens(pool, &config, &tokens, groups).await
+        }
+        Err(error) => Err(error),
+    }
+}
+
+pub async fn save_stock_group_policy(
+    pool: Option<&PgPool>,
+    group: &ShopeeStockGroup,
+) -> Result<(), ShopeeError> {
+    let Some(pool) = pool else {
+        return Ok(());
+    };
+    for occurrence in &group.occurrences {
+        upsert_stock_policy(pool, occurrence, group.target_stock, true, None).await?;
+    }
+    Ok(())
+}
+
+pub async fn reconcile_enabled_stock_policies(
+    pool: Option<&PgPool>,
+) -> Result<ShopeeStockSyncResult, ShopeeError> {
+    let Some(pool) = pool else {
+        return Err(ShopeeError::Api(String::from(
+            "banco local indisponivel para reconciliar politicas Shopee",
+        )));
+    };
+    let config = ShopeeConfig::from_env()?;
+    let tokens = ensure_connected_with_config(Some(pool), &config).await?;
+    match reconcile_enabled_stock_policies_with_tokens(pool, &config, &tokens).await {
+        Ok(result) => Ok(result),
+        Err(error) if error.is_token_error() => {
+            let tokens = refresh_tokens(Some(pool), &config, &tokens).await?;
+            reconcile_enabled_stock_policies_with_tokens(pool, &config, &tokens).await
         }
         Err(error) => Err(error),
     }
@@ -384,8 +456,8 @@ pub fn start_callback_listener(pool: Option<PgPool>) -> Result<String, ShopeeErr
                         "Shopee conectada. Tokens salvos. Pode voltar ao Razai TUI.",
                     );
                 }
-                CallbackResult::WebhookAccepted => {
-                    let _ = write_http_response(&mut stream, "Shopee webhook recebido.");
+                CallbackResult::WebhookAccepted(status) => {
+                    let _ = write_http_response(&mut stream, &status);
                 }
                 CallbackResult::Redirect(location) => {
                     let _ = write_http_redirect(&mut stream, &location);
@@ -505,6 +577,7 @@ async fn fetch_online_stock_groups_with_tokens(
 }
 
 async fn sync_stock_groups_with_tokens(
+    pool: Option<&PgPool>,
     config: &ShopeeConfig,
     tokens: &ShopeeTokens,
     groups: &[ShopeeStockGroup],
@@ -517,11 +590,103 @@ async fn sync_stock_groups_with_tokens(
         }
         for occurrence in &group.occurrences {
             match update_stock(config, tokens, occurrence, group.target_stock).await {
-                Ok(()) => result.updated += 1,
-                Err(error) => result.failed.push(format!(
-                    "{} item {} model {}: {error}",
-                    group.sku, occurrence.item_id, occurrence.model_id
-                )),
+                Ok(()) => {
+                    result.updated += 1;
+                    if let Some(pool) = pool {
+                        upsert_stock_policy(pool, occurrence, group.target_stock, true, None)
+                            .await?;
+                        mark_stock_policy_synced(
+                            pool,
+                            occurrence.item_id,
+                            occurrence.model_id,
+                            group.target_stock,
+                            None,
+                        )
+                        .await?;
+                    }
+                }
+                Err(error) => {
+                    if let Some(pool) = pool {
+                        let _ = upsert_stock_policy(
+                            pool,
+                            occurrence,
+                            group.target_stock,
+                            true,
+                            Some(&error.to_string()),
+                        )
+                        .await;
+                    }
+                    result.failed.push(format!(
+                        "{} item {} model {}: {error}",
+                        group.sku, occurrence.item_id, occurrence.model_id
+                    ));
+                }
+            }
+        }
+    }
+    Ok(result)
+}
+
+async fn reconcile_enabled_stock_policies_with_tokens(
+    pool: &PgPool,
+    config: &ShopeeConfig,
+    tokens: &ShopeeTokens,
+) -> Result<ShopeeStockSyncResult, ShopeeError> {
+    let policies = load_enabled_stock_policies(pool).await?;
+    if policies.is_empty() {
+        return Ok(ShopeeStockSyncResult::default());
+    }
+    let groups = fetch_online_stock_groups_with_tokens(config, tokens).await?;
+    let mut result = ShopeeStockSyncResult::default();
+    for policy in policies {
+        let Some(group) = find_group_for_policy(&groups, &policy) else {
+            result.failed.push(format!(
+                "{} item {} model {}: nao encontrado no estoque remoto",
+                policy.sku, policy.item_id, policy.model_id
+            ));
+            continue;
+        };
+        for occurrence in group.occurrences.iter().filter(|occurrence| {
+            occurrence.item_id == policy.item_id && occurrence.model_id == policy.model_id
+        }) {
+            if occurrence.seller_stock == policy.target_stock {
+                mark_stock_policy_synced(
+                    pool,
+                    occurrence.item_id,
+                    occurrence.model_id,
+                    occurrence.seller_stock,
+                    None,
+                )
+                .await?;
+                result.skipped += 1;
+                continue;
+            }
+            match update_stock(config, tokens, occurrence, policy.target_stock).await {
+                Ok(()) => {
+                    result.updated += 1;
+                    mark_stock_policy_synced(
+                        pool,
+                        occurrence.item_id,
+                        occurrence.model_id,
+                        policy.target_stock,
+                        None,
+                    )
+                    .await?;
+                }
+                Err(error) => {
+                    result.failed.push(format!(
+                        "{} item {} model {}: {error}",
+                        policy.sku, policy.item_id, policy.model_id
+                    ));
+                    mark_stock_policy_synced(
+                        pool,
+                        occurrence.item_id,
+                        occurrence.model_id,
+                        occurrence.seller_stock,
+                        Some(&error.to_string()),
+                    )
+                    .await?;
+                }
             }
         }
     }
@@ -1799,6 +1964,136 @@ pub fn group_stock_occurrences_by_parent(
     parents
 }
 
+async fn apply_saved_stock_policies(
+    pool: Option<&PgPool>,
+    parents: &mut [ShopeeStockParentGroup],
+) -> Result<(), ShopeeError> {
+    let Some(pool) = pool else {
+        return Ok(());
+    };
+    let policies = load_enabled_stock_policies(pool).await?;
+    for parent in parents {
+        for group in &mut parent.groups {
+            if let Some(policy) = policies.iter().find(|policy| {
+                group.occurrences.iter().any(|occurrence| {
+                    occurrence.item_id == policy.item_id && occurrence.model_id == policy.model_id
+                })
+            }) {
+                group.target_stock = policy.target_stock;
+            }
+        }
+    }
+    Ok(())
+}
+
+async fn load_enabled_stock_policies(pool: &PgPool) -> Result<Vec<ShopeeStockPolicy>, ShopeeError> {
+    ensure_shopee_tables(pool).await?;
+    let rows = sqlx::query(
+        r#"
+        SELECT item_id, model_id, sku, parent_sku, target_stock
+        FROM shopee_stock_policies
+        WHERE enabled = TRUE
+        ORDER BY parent_sku, sku, item_id, model_id
+        "#,
+    )
+    .fetch_all(pool)
+    .await
+    .map_err(ShopeeError::Db)?;
+
+    Ok(rows
+        .into_iter()
+        .map(|row| ShopeeStockPolicy {
+            item_id: row.get("item_id"),
+            model_id: row.get("model_id"),
+            sku: row.get("sku"),
+            parent_sku: row.get("parent_sku"),
+            target_stock: row.get("target_stock"),
+        })
+        .collect())
+}
+
+async fn upsert_stock_policy(
+    pool: &PgPool,
+    occurrence: &ShopeeStockOccurrence,
+    target_stock: i64,
+    enabled: bool,
+    last_error: Option<&str>,
+) -> Result<(), ShopeeError> {
+    ensure_shopee_tables(pool).await?;
+    sqlx::query(
+        r#"
+        INSERT INTO shopee_stock_policies (
+            item_id, model_id, sku, parent_sku, target_stock, enabled,
+            last_remote_stock, last_error, updated_at
+        )
+        VALUES ($1, $2, $3, $4, $5, $6, $7, $8, NOW())
+        ON CONFLICT (item_id, model_id) DO UPDATE SET
+            sku = EXCLUDED.sku,
+            parent_sku = EXCLUDED.parent_sku,
+            target_stock = EXCLUDED.target_stock,
+            enabled = EXCLUDED.enabled,
+            last_remote_stock = EXCLUDED.last_remote_stock,
+            last_error = EXCLUDED.last_error,
+            updated_at = NOW()
+        "#,
+    )
+    .bind(occurrence.item_id)
+    .bind(occurrence.model_id)
+    .bind(&occurrence.sku)
+    .bind(&occurrence.parent_sku)
+    .bind(target_stock)
+    .bind(enabled)
+    .bind(occurrence.seller_stock)
+    .bind(last_error)
+    .execute(pool)
+    .await
+    .map_err(ShopeeError::Db)?;
+    Ok(())
+}
+
+async fn mark_stock_policy_synced(
+    pool: &PgPool,
+    item_id: i64,
+    model_id: i64,
+    remote_stock: i64,
+    last_error: Option<&str>,
+) -> Result<(), ShopeeError> {
+    ensure_shopee_tables(pool).await?;
+    sqlx::query(
+        r#"
+        UPDATE shopee_stock_policies
+        SET last_remote_stock = $3,
+            last_synced_at = CASE WHEN $4::TEXT IS NULL THEN NOW() ELSE last_synced_at END,
+            last_error = $4,
+            updated_at = NOW()
+        WHERE item_id = $1 AND model_id = $2
+        "#,
+    )
+    .bind(item_id)
+    .bind(model_id)
+    .bind(remote_stock)
+    .bind(last_error)
+    .execute(pool)
+    .await
+    .map_err(ShopeeError::Db)?;
+    Ok(())
+}
+
+fn find_group_for_policy<'a>(
+    parents: &'a [ShopeeStockParentGroup],
+    policy: &ShopeeStockPolicy,
+) -> Option<&'a ShopeeStockGroup> {
+    parents
+        .iter()
+        .filter(|parent| policy.parent_sku.is_empty() || parent.sku == policy.parent_sku)
+        .flat_map(|parent| parent.groups.iter())
+        .find(|group| {
+            group.occurrences.iter().any(|occurrence| {
+                occurrence.item_id == policy.item_id && occurrence.model_id == policy.model_id
+            })
+        })
+}
+
 async fn parse_token_response(response: reqwest::Response) -> Result<ShopeeTokens, ShopeeError> {
     let status = response.status();
     let text = response
@@ -2043,7 +2338,7 @@ fn authorization_entry_url(config: &ShopeeConfig) -> String {
 
 enum CallbackResult {
     TokenSaved,
-    WebhookAccepted,
+    WebhookAccepted(String),
     Redirect(String),
     Error(ShopeeError),
 }
@@ -2060,7 +2355,7 @@ fn handle_callback_stream(pool: Option<&PgPool>, stream: &mut TcpStream) -> Call
     };
     let request = String::from_utf8_lossy(&buffer[..size]);
     if is_push_request(&request) {
-        return CallbackResult::WebhookAccepted;
+        return CallbackResult::WebhookAccepted(handle_push_reconcile(pool));
     }
     if is_auth_request(&request) {
         return match ShopeeConfig::from_env() {
@@ -2091,6 +2386,42 @@ fn is_push_request(request: &str) -> bool {
     request_path(request)
         .map(|path| path.trim_start_matches('/').starts_with("shopee/push"))
         .unwrap_or(false)
+}
+
+fn handle_push_reconcile(pool: Option<&PgPool>) -> String {
+    let Some(pool) = pool else {
+        return String::from("Shopee webhook recebido; banco local indisponivel.");
+    };
+    let runtime = match tokio::runtime::Runtime::new() {
+        Ok(runtime) => runtime,
+        Err(error) => {
+            return format!("Shopee webhook recebido; falha ao iniciar reconciliacao: {error}");
+        }
+    };
+    match runtime.block_on(reconcile_enabled_stock_policies(Some(pool))) {
+        Ok(result) => format!(
+            "Shopee webhook recebido; reconciliacao: {}",
+            format_stock_sync_result_for_webhook(&result)
+        ),
+        Err(error) => {
+            format!("Shopee webhook recebido; falha ao reconciliar estoque: {error}")
+        }
+    }
+}
+
+fn format_stock_sync_result_for_webhook(result: &ShopeeStockSyncResult) -> String {
+    if result.failed.is_empty() {
+        return format!(
+            "{} atualizados, {} sem alteracao",
+            result.updated, result.skipped
+        );
+    }
+    format!(
+        "{} atualizados, {} sem alteracao, {} falhas",
+        result.updated,
+        result.skipped,
+        result.failed.len()
+    )
 }
 
 fn is_auth_request(request: &str) -> bool {
@@ -2661,6 +2992,47 @@ mod tests {
 
         assert!(!groups[0].can_sync());
         assert!(groups[0].warning.is_some());
+    }
+
+    #[test]
+    fn stock_policy_finds_exact_parent_item_and_model() {
+        let parents = group_stock_occurrences_by_parent(vec![
+            ShopeeStockOccurrence {
+                parent_sku: String::from("ANAR"),
+                sku: String::from("BRANCO"),
+                item_id: 1,
+                model_id: 10,
+                name: String::from("Anarruga"),
+                seller_stock: 2,
+                available_stock: 2,
+                reserved_stock: 0,
+                location_id: None,
+                multi_location: false,
+            },
+            ShopeeStockOccurrence {
+                parent_sku: String::from("CANE"),
+                sku: String::from("BRANCO"),
+                item_id: 2,
+                model_id: 10,
+                name: String::from("Canelada"),
+                seller_stock: 3,
+                available_stock: 3,
+                reserved_stock: 0,
+                location_id: None,
+                multi_location: false,
+            },
+        ]);
+        let policy = ShopeeStockPolicy {
+            item_id: 2,
+            model_id: 10,
+            sku: String::from("BRANCO"),
+            parent_sku: String::from("CANE"),
+            target_stock: 0,
+        };
+
+        let group = find_group_for_policy(&parents, &policy).unwrap();
+
+        assert_eq!(group.total_current_stock, 3);
     }
 
     #[test]

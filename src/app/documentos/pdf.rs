@@ -212,11 +212,12 @@ fn draw_table_header(canvas: &mut PdfCanvas, y: f64) {
         "Thumbnail",
         0.12,
     );
-    canvas.text(FontKind::Bold, 8.4, LEFT + 72.0, y - 14.0, "Tecido", 0.12);
+    canvas.text(FontKind::Bold, 8.4, LEFT + 72.0, y - 14.0, "SKU", 0.12);
+    canvas.text(FontKind::Bold, 8.4, LEFT + 164.0, y - 14.0, "Tecido", 0.12);
     canvas.text(
         FontKind::Bold,
         8.4,
-        LEFT + 252.0,
+        LEFT + 318.0,
         y - 14.0,
         "Nome da Cor",
         0.12,
@@ -235,15 +236,23 @@ fn draw_row(canvas: &mut PdfCanvas, vinculo: &VinculoRecord, y: f64, shaded: boo
         8.6,
         LEFT + 72.0,
         y - 28.0,
-        &truncate_text(&vinculo.tecido_nome, 34),
+        &truncate_text(vinculo.sku.as_deref().unwrap_or("sem-sku"), 16),
         0.16,
     );
     canvas.text(
         FontKind::Regular,
         8.6,
-        LEFT + 252.0,
+        LEFT + 164.0,
         y - 28.0,
-        &truncate_text(&vinculo.cor_nome, 34),
+        &truncate_text(&vinculo.tecido_nome, 28),
+        0.16,
+    );
+    canvas.text(
+        FontKind::Regular,
+        8.6,
+        LEFT + 318.0,
+        y - 28.0,
+        &truncate_text(&vinculo.cor_nome, 24),
         0.16,
     );
     canvas.rect_stroke(LEFT + 458.0, y - 34.0, 15.0, 15.0, 1.0, 0.20);

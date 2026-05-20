@@ -32,6 +32,7 @@ mod agent_actions;
 mod background;
 mod configuracoes;
 mod dados;
+mod date_picker;
 mod documentos;
 mod estoque;
 mod pdf_actions;
@@ -105,6 +106,7 @@ pub struct App {
     pub image_protocol_status: String,
     vinculo_image_upload_task: BackgroundTask<VinculoImageUploadResult>,
     pub pending_unlink_vinculo: bool,
+    pub vinculo_unlink_warning: String,
     pub vinculo_custo_input: String,
     pub editing_vinculo_custo: bool,
     pub tecidos: Vec<TecidoRecord>,
@@ -146,7 +148,6 @@ pub struct App {
     pub venda_resumo_focus: bool,
     pub venda_item_option: usize,
     pub editing_venda_item: Option<usize>,
-    pub editing_venda_item_descricao: Option<String>,
     pub vendas_historico: Vec<VendaHistoricoRecord>,
     pub venda_historico_option: usize,
     pub venda_historico_field: usize,
@@ -179,6 +180,7 @@ pub struct App {
     pub estoque_quantidade: String,
     pub estoque_destino: String,
     pub estoque_observacao: String,
+    pub date_range_picker: Option<DateRangePicker>,
     pub pedidos_screen: PedidosScreen,
     pub pedido_menu_option: usize,
     pub pedido_tecido_option: usize,
@@ -282,6 +284,7 @@ impl App {
             image_protocol_status,
             vinculo_image_upload_task: BackgroundTask::default(),
             pending_unlink_vinculo: false,
+            vinculo_unlink_warning: String::new(),
             vinculo_custo_input: String::new(),
             editing_vinculo_custo: false,
             tecidos,
@@ -327,7 +330,6 @@ impl App {
             venda_resumo_focus: false,
             venda_item_option: 0,
             editing_venda_item: None,
-            editing_venda_item_descricao: None,
             vendas_historico,
             venda_historico_option: 0,
             venda_historico_field: 2,
@@ -360,6 +362,7 @@ impl App {
             estoque_quantidade: String::new(),
             estoque_destino: String::new(),
             estoque_observacao: String::new(),
+            date_range_picker: None,
             pedidos_screen: PedidosScreen::default(),
             pedido_menu_option: 0,
             pedido_tecido_option: 0,
@@ -573,6 +576,11 @@ impl App {
     fn handle_key(&mut self, key: KeyEvent) {
         if key.code == KeyCode::Char('c') && key.modifiers.contains(KeyModifiers::CONTROL) {
             self.running = false;
+            return;
+        }
+
+        if self.date_range_picker.is_some() {
+            self.handle_date_range_picker_key(key.code);
             return;
         }
 
@@ -1084,14 +1092,26 @@ impl App {
             }
             KeyCode::Char(' ') => {
                 if self.shopee_menu_option == 1 {
-                    if let Some(group) = self.selected_shopee_stock_child_mut() {
+                    let policy_group = if let Some(group) = self.selected_shopee_stock_child_mut() {
                         group.toggle_target();
+                        let group = group.clone();
                         self.shopee_status =
                             format!("SKU {} marcado para {}.", group.sku, group.target_label());
+                        Some(group)
                     } else {
                         self.shopee_status =
                             String::from("Expanda um SKU Pai e selecione uma variacao para 0/100.");
-                    }
+                        None
+                    };
+                    if let (Some(pool), Some(group)) = (self.db_pool.as_ref(), policy_group) {
+                        if let Err(error) = self
+                            .db_runtime
+                            .block_on(shopee::save_stock_group_policy(Some(pool), &group))
+                        {
+                            self.shopee_status =
+                                format!("Falha ao salvar politica Shopee: {error}");
+                        }
+                    };
                 }
             }
             KeyCode::Enter => {
@@ -1156,6 +1176,9 @@ impl App {
                 self.shopee_stock_groups.clear();
                 self.shopee_stock_cursor = 0;
                 self.shopee_status = String::from("Estoque Shopee limpo. Enter recarrega.");
+            }
+            KeyCode::Char('c') | KeyCode::Char('C') if self.shopee_menu_option == 1 => {
+                self.start_shopee_stock_reconcile();
             }
             _ => {}
         }
@@ -1271,6 +1294,35 @@ impl App {
                         Ok(result) => format_shopee_stock_sync_result(result),
                         Err(error) => format!("Shopee: falha ao sincronizar estoque: {error}"),
                     };
+                ShopeeTaskResult::StockSync(status)
+            },
+        );
+    }
+
+    fn start_shopee_stock_reconcile(&mut self) {
+        let pool = self.db_pool.clone();
+        self.start_shopee_task(
+            "Shopee: reconciliando politicas de estoque em segundo plano...",
+            move || {
+                let runtime = match Runtime::new() {
+                    Ok(runtime) => runtime,
+                    Err(error) => {
+                        return ShopeeTaskResult::StockSync(format!(
+                            "Shopee: falha ao iniciar reconciliacao: {error}"
+                        ));
+                    }
+                };
+                let status = match runtime
+                    .block_on(shopee::reconcile_enabled_stock_policies(pool.as_ref()))
+                {
+                    Ok(result) => {
+                        format!(
+                            "Reconciliacao Shopee: {}",
+                            format_shopee_stock_sync_result(result)
+                        )
+                    }
+                    Err(error) => format!("Shopee: falha ao reconciliar politicas: {error}"),
+                };
                 ShopeeTaskResult::StockSync(status)
             },
         );
@@ -1608,6 +1660,7 @@ impl App {
             );
         }
         screens::chrome::render_footer(frame, outer[3], &self.db_status, self.focus);
+        screens::date_picker::render(frame, frame.area(), self.date_range_picker.as_ref());
     }
 
     pub fn vinculo_image_upload_started(&self) -> Option<Instant> {

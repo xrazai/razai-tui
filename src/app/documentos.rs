@@ -25,6 +25,7 @@ impl App {
     }
 
     fn handle_checklist_key(&mut self, key: KeyCode) {
+        self.prune_checklist_selection();
         match key {
             KeyCode::Esc => {
                 self.checklist_active = false;
@@ -87,6 +88,7 @@ impl App {
     }
 
     fn gerar_checklist_pdf(&mut self) {
+        self.prune_checklist_selection();
         if self.checklist_pdf_task.is_running() {
             self.db_status = String::from("Aguarde o checklist atual terminar.");
             return;
@@ -110,6 +112,15 @@ impl App {
         self.db_status = String::from("Gerando checklist em segundo plano...");
         self.checklist_pdf_task
             .start(move || gerar_checklist_pdf_worker(pool, selected));
+    }
+
+    pub(super) fn prune_checklist_selection(&mut self) {
+        self.checklist_selected_tecidos
+            .retain(|id| self.tecidos.iter().any(|tecido| tecido.id == *id));
+        let len = self.checklist_len();
+        if len > 0 {
+            self.checklist_cursor = self.checklist_cursor.min(len - 1);
+        }
     }
 }
 
@@ -173,9 +184,24 @@ fn gerar_checklist_pdf_worker(
 fn checklist_pdf_path() -> Result<PathBuf, String> {
     let dir = checklist_pdf_dir();
     fs::create_dir_all(&dir).map_err(|error| format!("falha ao criar pasta de PDFs: {error}"))?;
+    let timestamp = chrono::Local::now().format("%Y%m%d_%H%M%S");
+    for attempt in 0..100 {
+        let suffix = if attempt == 0 {
+            String::new()
+        } else {
+            format!("_{attempt:02}")
+        };
+        let path = dir.join(format!("razai_checklist_{timestamp}{suffix}.pdf"));
+        if !path.exists() {
+            return Ok(path);
+        }
+    }
     Ok(dir.join(format!(
-        "razai_checklist_{}.pdf",
-        chrono::Local::now().format("%Y%m%d_%H%M%S")
+        "razai_checklist_{}_fallback_{}.pdf",
+        timestamp,
+        chrono::Local::now()
+            .timestamp_nanos_opt()
+            .unwrap_or_default()
     )))
 }
 

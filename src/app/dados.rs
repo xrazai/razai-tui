@@ -45,8 +45,8 @@ impl App {
         match key {
             KeyCode::Esc => self.voltar_dados(),
             KeyCode::Backspace => self.tecido_form.backspace(),
-            KeyCode::Up => self.tecido_form.previous_field(),
-            KeyCode::Down => self.tecido_form.next_field(),
+            KeyCode::Up => self.previous_tecido_form_field(),
+            KeyCode::Down => self.next_tecido_form_field(),
             KeyCode::Enter if self.tecido_form.selected_field == TecidoField::Salvar => {
                 self.cadastrar_tecido();
             }
@@ -62,7 +62,7 @@ impl App {
             {
                 self.tecido_select_dropdown = Some(self.tecido_form.selected_field);
             }
-            KeyCode::Enter => self.tecido_form.next_field(),
+            KeyCode::Enter => self.next_tecido_form_field(),
             KeyCode::Char(character) => self.tecido_form.push(character),
             _ => {}
         }
@@ -83,8 +83,8 @@ impl App {
         match key {
             KeyCode::Esc => self.voltar_dados(),
             KeyCode::Backspace => self.cor_form.backspace(),
-            KeyCode::Up => self.cor_form.previous_field(),
-            KeyCode::Down => self.cor_form.next_field(),
+            KeyCode::Up => self.previous_cor_form_field(),
+            KeyCode::Down => self.next_cor_form_field(),
             KeyCode::Enter if self.cor_form.selected_field == CorField::Confirmar => {
                 self.confirmar_cor();
             }
@@ -94,7 +94,7 @@ impl App {
             KeyCode::Enter if self.cor_form.selected_field == CorField::Excluir => {
                 self.pending_delete = true;
             }
-            KeyCode::Enter => self.cor_form.next_field(),
+            KeyCode::Enter => self.next_cor_form_field(),
             KeyCode::Char(character) => self.cor_form.push(character),
             _ => {}
         }
@@ -115,8 +115,8 @@ impl App {
         match key {
             KeyCode::Esc => self.voltar_dados(),
             KeyCode::Backspace => self.estampa_form.backspace(),
-            KeyCode::Up => self.estampa_form.previous_field(),
-            KeyCode::Down => self.estampa_form.next_field(),
+            KeyCode::Up => self.previous_estampa_form_field(),
+            KeyCode::Down => self.next_estampa_form_field(),
             KeyCode::Enter if self.estampa_form.selected_field == EstampaField::Confirmar => {
                 self.confirmar_estampa();
             }
@@ -126,7 +126,7 @@ impl App {
             KeyCode::Enter if self.estampa_form.selected_field == EstampaField::Excluir => {
                 self.pending_delete = true;
             }
-            KeyCode::Enter => self.estampa_form.next_field(),
+            KeyCode::Enter => self.next_estampa_form_field(),
             KeyCode::Char(character) => self.estampa_form.push(character),
             _ => {}
         }
@@ -147,8 +147,8 @@ impl App {
         match key {
             KeyCode::Esc => self.voltar_dados(),
             KeyCode::Backspace => self.fornecedor_form.backspace(),
-            KeyCode::Up => self.fornecedor_form.previous_field(),
-            KeyCode::Down => self.fornecedor_form.next_field(),
+            KeyCode::Up => self.previous_fornecedor_form_field(),
+            KeyCode::Down => self.next_fornecedor_form_field(),
             KeyCode::Enter if self.fornecedor_form.selected_field == FornecedorField::Confirmar => {
                 self.confirmar_fornecedor();
             }
@@ -158,7 +158,7 @@ impl App {
             KeyCode::Enter if self.fornecedor_form.selected_field == FornecedorField::Excluir => {
                 self.pending_delete = true;
             }
-            KeyCode::Enter => self.fornecedor_form.next_field(),
+            KeyCode::Enter => self.next_fornecedor_form_field(),
             KeyCode::Char(character) => self.fornecedor_form.push(character),
             _ => {}
         }
@@ -213,6 +213,7 @@ impl App {
             }
             DadosScreen::VinculoDetalhe => {
                 self.pending_unlink_vinculo = false;
+                self.vinculo_unlink_warning.clear();
                 self.dados_screen = DadosScreen::VinculosLista;
             }
             DadosScreen::VinculosSelecionarTecidoCriar
@@ -335,6 +336,74 @@ impl App {
         }
     }
 
+    fn next_tecido_form_field(&mut self) {
+        self.tecido_form.next_field();
+        if self.editing_tecido_id.is_none()
+            && self.tecido_form.selected_field == TecidoField::Excluir
+        {
+            self.tecido_form.next_field();
+        }
+    }
+
+    fn previous_tecido_form_field(&mut self) {
+        self.tecido_form.previous_field();
+        if self.editing_tecido_id.is_none()
+            && self.tecido_form.selected_field == TecidoField::Excluir
+        {
+            self.tecido_form.previous_field();
+        }
+    }
+
+    fn next_cor_form_field(&mut self) {
+        self.cor_form.next_field();
+        if self.editing_cor_id.is_none() && self.cor_form.selected_field == CorField::Excluir {
+            self.cor_form.next_field();
+        }
+    }
+
+    fn previous_cor_form_field(&mut self) {
+        self.cor_form.previous_field();
+        if self.editing_cor_id.is_none() && self.cor_form.selected_field == CorField::Excluir {
+            self.cor_form.previous_field();
+        }
+    }
+
+    fn next_estampa_form_field(&mut self) {
+        self.estampa_form.next_field();
+        if self.editing_estampa_id.is_none()
+            && self.estampa_form.selected_field == EstampaField::Excluir
+        {
+            self.estampa_form.next_field();
+        }
+    }
+
+    fn previous_estampa_form_field(&mut self) {
+        self.estampa_form.previous_field();
+        if self.editing_estampa_id.is_none()
+            && self.estampa_form.selected_field == EstampaField::Excluir
+        {
+            self.estampa_form.previous_field();
+        }
+    }
+
+    fn next_fornecedor_form_field(&mut self) {
+        self.fornecedor_form.next_field();
+        if self.editing_fornecedor_id.is_none()
+            && self.fornecedor_form.selected_field == FornecedorField::Excluir
+        {
+            self.fornecedor_form.next_field();
+        }
+    }
+
+    fn previous_fornecedor_form_field(&mut self) {
+        self.fornecedor_form.previous_field();
+        if self.editing_fornecedor_id.is_none()
+            && self.fornecedor_form.selected_field == FornecedorField::Excluir
+        {
+            self.fornecedor_form.previous_field();
+        }
+    }
+
     pub(super) fn excluir_tecido_confirmado(&mut self) {
         let Some(id) = self.editing_tecido_id else {
             self.pending_delete = false;
@@ -353,7 +422,8 @@ impl App {
         }
 
         self.reload_tecidos();
-        self.db_status = String::from("Tecido excluido do banco local");
+        self.db_status =
+            String::from("Tecido arquivado. Historico e estoque permanecem preservados.");
         self.tecido_form = TecidoForm::default();
         self.tecido_select_dropdown = None;
         self.editing_tecido_id = None;
@@ -631,7 +701,8 @@ impl App {
             return;
         }
         self.reload_fornecedores();
-        self.db_status = String::from("Fornecedor excluido do banco local");
+        self.db_status =
+            String::from("Fornecedor arquivado. Relatorios historicos permanecem preservados.");
         self.fornecedor_form = FornecedorForm::default();
         self.editing_fornecedor_id = None;
         self.pending_delete = false;
@@ -712,6 +783,7 @@ impl App {
         }
         self.focus = Focus::System;
         self.pending_unlink_vinculo = false;
+        self.vinculo_unlink_warning.clear();
         self.editing_vinculo_custo = false;
         self.vinculo_detalhe_option = VinculoDetalheOption::Slot(VinculoImageSlot::Original);
         self.vinculo_image_slot = VinculoImageSlot::Original;
@@ -784,12 +856,16 @@ impl App {
             KeyCode::Char(character)
                 if !character.is_control() && self.editing_lista_preco_tecido =>
             {
-                self.lista_precos_tecido_input.push(character);
+                if is_money_input_char(character) {
+                    self.lista_precos_tecido_input.push(character);
+                }
             }
             KeyCode::Char(character)
                 if !character.is_control() && self.editing_lista_preco_vinculo =>
             {
-                self.lista_precos_vinculo_input.push(character);
+                if is_money_input_char(character) {
+                    self.lista_precos_vinculo_input.push(character);
+                }
             }
             _ => {}
         }
@@ -966,8 +1042,8 @@ impl App {
             }
             VinculoDetalheOption::Desfazer => {
                 self.pending_unlink_vinculo = true;
-                self.db_status =
-                    String::from("Confirmar desfazer vinculo? S/Enter confirma, N/Esc cancela.");
+                self.vinculo_unlink_warning = self.build_vinculo_unlink_warning();
+                self.db_status = self.vinculo_unlink_warning.clone();
             }
         }
     }
@@ -979,6 +1055,7 @@ impl App {
             }
             KeyCode::Esc | KeyCode::Char('n') | KeyCode::Char('N') => {
                 self.pending_unlink_vinculo = false;
+                self.vinculo_unlink_warning.clear();
                 self.db_status = String::from("Desfazer vinculo cancelado.");
             }
             _ => {}
@@ -996,7 +1073,7 @@ impl App {
             KeyCode::Backspace => {
                 self.vinculo_custo_input.pop();
             }
-            KeyCode::Char(character) if !character.is_control() => {
+            KeyCode::Char(character) if is_money_input_char(character) => {
                 self.vinculo_custo_input.push(character);
             }
             _ => {}
@@ -1006,6 +1083,7 @@ impl App {
     pub(super) fn select_vinculo_image_slot_shortcut(&mut self, character: char) {
         if let Some(slot) = VinculoImageSlot::from_shortcut(character) {
             self.pending_unlink_vinculo = false;
+            self.vinculo_unlink_warning.clear();
             self.editing_vinculo_custo = false;
             self.vinculo_detalhe_option = VinculoDetalheOption::Slot(slot);
             self.vinculo_image_slot = slot;
@@ -1015,6 +1093,7 @@ impl App {
 
     pub(super) fn next_vinculo_image_slot(&mut self) {
         self.pending_unlink_vinculo = false;
+        self.vinculo_unlink_warning.clear();
         self.editing_vinculo_custo = false;
         self.vinculo_detalhe_option = self.vinculo_detalhe_option.next();
         if let Some(slot) = self.vinculo_detalhe_option.selected_slot() {
@@ -1025,6 +1104,7 @@ impl App {
 
     pub(super) fn previous_vinculo_image_slot(&mut self) {
         self.pending_unlink_vinculo = false;
+        self.vinculo_unlink_warning.clear();
         self.editing_vinculo_custo = false;
         self.vinculo_detalhe_option = self.vinculo_detalhe_option.previous();
         if let Some(slot) = self.vinculo_detalhe_option.selected_slot() {
@@ -1045,6 +1125,7 @@ impl App {
             _ => (self.vinculo_lista_option + 1) % self.vinculos.len(),
         };
         self.pending_unlink_vinculo = false;
+        self.vinculo_unlink_warning.clear();
         self.editing_vinculo_custo = false;
         self.vinculo_detalhe_option = VinculoDetalheOption::Slot(VinculoImageSlot::Original);
         self.vinculo_image_slot = VinculoImageSlot::Original;
@@ -1312,6 +1393,7 @@ impl App {
         )) {
             Ok(()) => {
                 self.pending_unlink_vinculo = false;
+                self.vinculo_unlink_warning.clear();
                 self.load_vinculos(tecido_id);
                 if self.vinculos.is_empty() {
                     self.vinculo_images = VinculoImages::default();
@@ -1333,9 +1415,35 @@ impl App {
             }
             Err(error) => {
                 self.pending_unlink_vinculo = false;
+                self.vinculo_unlink_warning.clear();
                 self.db_status = format!("Erro ao desfazer vinculo: {error}");
             }
         }
+    }
+
+    fn build_vinculo_unlink_warning(&self) -> String {
+        let Some((tecido_id, item_id, usa_estampas)) = self.selected_vinculo_keys() else {
+            return String::from("Confirmar desfazer vinculo? S/Enter confirma, N/Esc cancela.");
+        };
+        let saldo = self
+            .db_pool
+            .as_ref()
+            .and_then(|pool| {
+                self.db_runtime
+                    .block_on(db::get_vinculo_stock_balance(
+                        pool,
+                        tecido_id,
+                        item_id,
+                        usa_estampas,
+                    ))
+                    .ok()
+            })
+            .map(|value| format!("{value:.2}").replace('.', ","))
+            .unwrap_or_else(|| String::from("indisponivel"));
+
+        format!(
+            "Confirmar desfazer vinculo? Saldo atual: {saldo}. Ele sai de novos lancamentos, mas historico, estoque e imagens permanecem. S/Enter confirma, N/Esc cancela."
+        )
     }
 
     fn selected_vinculo_keys(&self) -> Option<(i64, i64, bool)> {

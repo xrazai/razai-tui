@@ -127,13 +127,59 @@ pub async fn update_pedido_itens(
 }
 
 pub async fn approve_pedido(pool: &PgPool, pedido_id: i64) -> Result<(), sqlx::Error> {
-    let itens = list_pedido_itens(pool, pedido_id).await?;
-    crate::db::insert_venda(pool, &itens).await?;
+    let mut transaction = pool.begin().await?;
+    let status: String = sqlx::query_scalar("SELECT status FROM pedidos WHERE id = $1 FOR UPDATE")
+        .bind(pedido_id)
+        .fetch_one(&mut *transaction)
+        .await?;
+    if status != "pendente" {
+        return Err(sqlx::Error::Protocol(format!(
+            "pedido #{pedido_id} nao esta pendente"
+        )));
+    }
+    let itens = list_pedido_itens_in_transaction(&mut transaction, pedido_id).await?;
+    crate::db::insert_venda_in_transaction(&mut transaction, &itens).await?;
     sqlx::query("UPDATE pedidos SET status = 'aprovado' WHERE id = $1")
         .bind(pedido_id)
-        .execute(pool)
+        .execute(&mut *transaction)
         .await?;
+    transaction.commit().await?;
     Ok(())
+}
+
+async fn list_pedido_itens_in_transaction(
+    transaction: &mut sqlx::Transaction<'_, sqlx::Postgres>,
+    pedido_id: i64,
+) -> Result<Vec<VendaItem>, sqlx::Error> {
+    let rows = sqlx::query(
+        r#"
+        SELECT
+            descricao,
+            quantidade::float8 AS quantidade,
+            preco_unitario::float8 AS preco_unitario,
+            estoque_tecido_id,
+            estoque_item_id,
+            estoque_usa_estampas
+        FROM pedido_itens
+        WHERE pedido_id = $1
+        ORDER BY id
+        "#,
+    )
+    .bind(pedido_id)
+    .fetch_all(&mut **transaction)
+    .await?;
+
+    Ok(rows
+        .into_iter()
+        .map(|row| VendaItem {
+            descricao: row.get("descricao"),
+            quantidade: row.get("quantidade"),
+            preco_unitario: row.get("preco_unitario"),
+            estoque_tecido_id: row.get("estoque_tecido_id"),
+            estoque_item_id: row.get("estoque_item_id"),
+            estoque_usa_estampas: row.get("estoque_usa_estampas"),
+        })
+        .collect())
 }
 
 pub async fn delete_pedido(pool: &PgPool, pedido_id: i64) -> Result<(), sqlx::Error> {

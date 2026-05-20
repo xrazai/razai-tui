@@ -28,6 +28,7 @@ fn main() -> io::Result<()> {
         let _ = db_runtime.block_on(db::ensure_estampas_tables(pool));
         let _ = db_runtime.block_on(db::ensure_vendas_tables(pool));
         let _ = db_runtime.block_on(db::ensure_estoque_tables(pool));
+        let _ = db_runtime.block_on(shopee::ensure_shopee_tables(pool));
         let _ = db_runtime.block_on(db::ensure_pedidos_tables(pool));
         let _ = db_runtime.block_on(db::ensure_tecido_custo_base_column(pool));
         let _ = db_runtime.block_on(db::ensure_vinculo_image_columns(pool));

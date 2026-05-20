@@ -159,7 +159,9 @@ Responsabilidades:
 - detectar/iniciar ngrok e persistir URLs publicas;
 - separar OAuth (`/shopee/auth` e `/shopee/callback`) do push/webhook (`/shopee/push`);
 - consultar anuncios/modelos da Shopee e agrupar estoque por SKU;
-- sincronizar o SKU selecionado para `0` ou `100` via `product/update_stock`.
+- persistir politicas de estoque online por `item_id/model_id`;
+- sincronizar o SKU selecionado para `0` ou `100` via `product/update_stock`;
+- reconciliar politicas ativas quando o operador pressiona `C` ou quando `/shopee/push` recebe webhook.
 
 Fluxo de estoque:
 
@@ -167,8 +169,11 @@ Fluxo de estoque:
 2. `product/get_item_base_info` busca dados em lotes de ate 50.
 3. `product/get_model_list` busca modelos quando o item possui variacoes.
 4. O app agrupa primeiro por SKU Pai (`item_sku`) e depois por variacao (`model_sku` ou `item_sku`), normalizado com `trim + uppercase`.
-5. O operador expande o SKU Pai e alterna a variacao entre `Zerar 0` e `Ativar 100`.
-6. A confirmacao atualiza apenas a variacao selecionada.
+5. O operador expande o SKU Pai e alterna a variacao entre alvo `0` e alvo `100`; esse alvo e salvo em `shopee_stock_policies`.
+6. A confirmacao por `Enter` atualiza apenas a variacao selecionada.
+7. A reconciliacao por `C` ou por `/shopee/push` consulta novamente a Shopee e reaplica o alvo salvo quando o estoque remoto divergir.
+
+O webhook e tratado como gatilho de reconciliacao, nao como fonte de verdade. O app precisa estar aberto, com callback/ngrok ativo e URL de push cadastrada na Shopee. Grupos multi-location permanecem bloqueados para sync automatico.
 
 Fluxo de anuncio:
 

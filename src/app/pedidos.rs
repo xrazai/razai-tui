@@ -188,15 +188,27 @@ impl App {
                 }
                 match self.pedido_field {
                     VendaField::Quantidade => self.confirmar_lancamento_pedido(),
+                    VendaField::Finalizar
+                        if self.editing_pedido_id.is_some() && self.pedido_atual_aprovado() =>
+                    {
+                        self.db_status = String::from(
+                            "Pedido aprovado fica somente leitura. Use [Compartilhar].",
+                        );
+                    }
                     VendaField::Finalizar if self.editing_pedido_id.is_some() => {
                         self.pending_approve_pedido = true
                     }
                     VendaField::Finalizar => self.abrir_dialog_finalizar_pedido(),
+                    VendaField::Cancelar
+                        if self.editing_pedido_id.is_some() && self.pedido_atual_aprovado() =>
+                    {
+                        self.db_status = String::from("Pedido aprovado nao pode ser cancelado.");
+                    }
                     VendaField::Cancelar if self.editing_pedido_id.is_some() => {
                         self.pending_delete_pedido = true
                     }
                     VendaField::Cancelar => self.cancelar_pedido(),
-                    VendaField::Excluir if self.editing_pedido_id.is_some() => {
+                    VendaField::Compartilhar if self.editing_pedido_id.is_some() => {
                         self.compartilhar_pedido_atual()
                     }
                     _ => self.pedido_field = self.pedido_field.next(),
@@ -270,6 +282,10 @@ impl App {
     }
 
     fn confirmar_lancamento_pedido(&mut self) {
+        if self.pedido_atual_aprovado() {
+            self.db_status = String::from("Pedido aprovado fica somente leitura.");
+            return;
+        }
         if let Some(pedido_id) = self.editing_pedido_id
             && self.block_if_pedido_pdf_running_for(pedido_id, "alterar")
         {
@@ -278,6 +294,7 @@ impl App {
         let preco = parse_number(&self.pedido_preco).unwrap_or(0.0);
         let quantidade = parse_number(&self.pedido_quantidade).unwrap_or(0.0);
         if preco <= 0.0 || quantidade <= 0.0 {
+            self.db_status = String::from("Informe preco e quantidade maiores que zero.");
             return;
         }
         let item = if let Some(index) = self.editing_pedido_item {
@@ -294,6 +311,7 @@ impl App {
             }
         } else {
             let Some(vinculo) = self.pedido_vinculos.get(self.pedido_vinculo_option) else {
+                self.db_status = String::from("Selecione um vinculo antes de lancar pedido.");
                 return;
             };
             VendaItem {
@@ -409,24 +427,35 @@ impl App {
             return;
         };
         let pedido_id = pedido.id;
+        let status = pedido.status.clone();
         if self.block_if_pedido_pdf_running_for(pedido_id, "abrir") {
             return;
         }
-        if let Some(pool) = &self.db_pool {
-            match self
-                .db_runtime
-                .block_on(db::list_pedido_itens(pool, pedido_id))
-            {
-                Ok(itens) => {
-                    self.pedido_itens = itens;
-                    self.editing_pedido_id = Some(pedido_id);
-                    self.editing_pedido_item = None;
-                    self.pedidos_screen = PedidosScreen::Lancamento;
-                    self.pedido_field = VendaField::Finalizar;
-                    self.db_status = format!("Pedido #{pedido_id} aberto");
-                }
-                Err(error) => self.db_status = format!("Erro ao abrir pedido: {error}"),
+        let Some(pool) = &self.db_pool else {
+            self.db_status = String::from("Banco local indisponivel para abrir pedido");
+            return;
+        };
+        match self
+            .db_runtime
+            .block_on(db::list_pedido_itens(pool, pedido_id))
+        {
+            Ok(itens) => {
+                self.pedido_itens = itens;
+                self.editing_pedido_id = Some(pedido_id);
+                self.editing_pedido_item = None;
+                self.pedidos_screen = PedidosScreen::Lancamento;
+                self.pedido_field = if status == "aprovado" {
+                    VendaField::Compartilhar
+                } else {
+                    VendaField::Finalizar
+                };
+                self.db_status = if status == "aprovado" {
+                    format!("Pedido #{pedido_id} aprovado aberto somente para consulta")
+                } else {
+                    format!("Pedido #{pedido_id} aberto")
+                };
             }
+            Err(error) => self.db_status = format!("Erro ao abrir pedido: {error}"),
         }
     }
 
@@ -475,25 +504,33 @@ impl App {
             self.pending_approve_pedido = false;
             return;
         }
-        if let Some(pool) = &self.db_pool {
-            match self
-                .db_runtime
-                .block_on(db::approve_pedido(pool, pedido_id))
-            {
-                Ok(()) => {
-                    self.reload_pedidos_historico();
-                    self.reload_vendas_historico();
-                    self.reload_estoque_saldos();
-                    self.reload_estoque_ordens();
-                    self.pedido_itens.clear();
-                    self.editing_pedido_id = None;
-                    self.editing_pedido_item = None;
-                    self.pending_approve_pedido = false;
-                    self.pedidos_screen = PedidosScreen::Historico;
-                    self.db_status = format!("Pedido #{pedido_id} aprovado e convertido em venda");
-                }
-                Err(error) => self.db_status = format!("Erro ao aprovar pedido: {error}"),
+        if self.pedido_status(pedido_id).as_deref() != Some("pendente") {
+            self.pending_approve_pedido = false;
+            self.db_status = String::from("Somente pedidos pendentes podem ser aprovados.");
+            return;
+        }
+        let Some(pool) = &self.db_pool else {
+            self.pending_approve_pedido = false;
+            self.db_status = String::from("Banco local indisponivel para aprovar pedido");
+            return;
+        };
+        match self
+            .db_runtime
+            .block_on(db::approve_pedido(pool, pedido_id))
+        {
+            Ok(()) => {
+                self.reload_pedidos_historico();
+                self.reload_vendas_historico();
+                self.reload_estoque_saldos();
+                self.reload_estoque_ordens();
+                self.pedido_itens.clear();
+                self.editing_pedido_id = None;
+                self.editing_pedido_item = None;
+                self.pending_approve_pedido = false;
+                self.pedidos_screen = PedidosScreen::Historico;
+                self.db_status = format!("Pedido #{pedido_id} aprovado e convertido em venda");
             }
+            Err(error) => self.db_status = format!("Erro ao aprovar pedido: {error}"),
         }
     }
 
@@ -504,6 +541,11 @@ impl App {
         };
         if self.block_if_pedido_pdf_running_for(pedido_id, "cancelar") {
             self.pending_delete_pedido = false;
+            return;
+        }
+        if self.pedido_status(pedido_id).as_deref() == Some("aprovado") {
+            self.pending_delete_pedido = false;
+            self.db_status = String::from("Pedido aprovado nao pode ser cancelado.");
             return;
         }
         let Some(pool) = &self.db_pool else {
@@ -574,7 +616,12 @@ impl App {
                 self.pedido_preco.push(character);
             }
             VendaField::Quantidade => self.pedido_quantidade.push(character),
-            _ => {}
+            VendaField::Tecido
+            | VendaField::Vinculo
+            | VendaField::Finalizar
+            | VendaField::Cancelar
+            | VendaField::Compartilhar
+            | VendaField::Excluir => {}
         }
     }
 
@@ -591,7 +638,12 @@ impl App {
             VendaField::Quantidade => {
                 self.pedido_quantidade.pop();
             }
-            _ => {}
+            VendaField::Tecido
+            | VendaField::Vinculo
+            | VendaField::Finalizar
+            | VendaField::Cancelar
+            | VendaField::Compartilhar
+            | VendaField::Excluir => {}
         }
     }
 
@@ -600,6 +652,16 @@ impl App {
             && self.pedido_resumo_focus
             && self.pedido_item_option < self.pedido_itens.len()
         {
+            if self.pedido_atual_aprovado() {
+                self.db_status = String::from("Pedido aprovado fica somente leitura.");
+                return;
+            }
+            if self.editing_pedido_id.is_some() && self.pedido_itens.len() == 1 {
+                self.db_status = String::from(
+                    "Pedido salvo precisa manter ao menos um lancamento. Use [Cancelar Pedido].",
+                );
+                return;
+            }
             if let Some(pedido_id) = self.editing_pedido_id
                 && self.block_if_pedido_pdf_running_for(pedido_id, "alterar")
             {
@@ -666,7 +728,7 @@ impl App {
     }
 
     fn normalize_pedido_field(&mut self) {
-        if self.editing_pedido_id.is_none() && self.pedido_field == VendaField::Excluir {
+        if self.editing_pedido_id.is_none() && self.pedido_field == VendaField::Compartilhar {
             self.pedido_field = VendaField::Tecido;
         }
     }
@@ -742,6 +804,20 @@ impl App {
             self.editing_pedido_id = None;
             self.editing_pedido_item = None;
         }
+    }
+
+    fn pedido_atual_aprovado(&self) -> bool {
+        self.editing_pedido_id
+            .and_then(|pedido_id| self.pedido_status(pedido_id))
+            .as_deref()
+            == Some("aprovado")
+    }
+
+    fn pedido_status(&self, pedido_id: i64) -> Option<String> {
+        self.pedidos_historico
+            .iter()
+            .find(|pedido| pedido.id == pedido_id)
+            .map(|pedido| pedido.status.clone())
     }
 
     pub(super) fn abrir_compartilhamento_pedido(
@@ -905,7 +981,7 @@ fn pedido_field_order(editing: bool) -> &'static [VendaField] {
             VendaField::Preco,
             VendaField::Quantidade,
             VendaField::Finalizar,
-            VendaField::Excluir,
+            VendaField::Compartilhar,
             VendaField::Cancelar,
         ]
     } else {
@@ -945,11 +1021,7 @@ fn preco_option_value(vinculo: &db::VinculoRecord, option: usize) -> Option<f64>
 }
 
 fn format_number_input(value: f64) -> String {
-    if value.fract() == 0.0 {
-        format!("{value:.0}")
-    } else {
-        format!("{value:.2}").replace('.', ",")
-    }
+    format!("{value:.2}").replace('.', ",")
 }
 
 #[cfg(test)]
@@ -1021,19 +1093,19 @@ mod tests {
                     VendaField::Preco,
                     VendaField::Quantidade,
                     VendaField::Finalizar,
-                    VendaField::Excluir,
+                    VendaField::Compartilhar,
                     VendaField::Cancelar,
                 ]
         );
-        assert!(next_in_order(VendaField::Finalizar, order) == VendaField::Excluir);
-        assert!(previous_in_order(VendaField::Cancelar, order) == VendaField::Excluir);
+        assert!(next_in_order(VendaField::Finalizar, order) == VendaField::Compartilhar);
+        assert!(previous_in_order(VendaField::Cancelar, order) == VendaField::Compartilhar);
     }
 
     #[test]
     fn pedido_novo_field_order_omits_compartilhar() {
         let order = pedido_field_order(false);
 
-        assert!(!order.contains(&VendaField::Excluir));
+        assert!(!order.contains(&VendaField::Compartilhar));
         assert!(next_in_order(VendaField::Finalizar, order) == VendaField::Cancelar);
     }
 }

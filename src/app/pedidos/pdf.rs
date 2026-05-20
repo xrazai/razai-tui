@@ -492,11 +492,7 @@ fn format_money(value: f64) -> String {
 }
 
 fn format_quantity(value: f64) -> String {
-    if value.fract().abs() < f64::EPSILON {
-        format!("{}", value as i64)
-    } else {
-        format!("{value:.2}").replace('.', ",")
-    }
+    format!("{value:.2}").replace('.', ",")
 }
 
 fn truncate_text(value: &str, max_chars: usize) -> String {

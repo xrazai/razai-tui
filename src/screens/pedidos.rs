@@ -282,7 +282,7 @@ fn render_lancamento(frame: &mut Frame, area: Rect, app: &App) {
     ]);
     if app.editing_pedido_id.is_some() {
         lines.push(action_line(
-            VendaField::Excluir,
+            VendaField::Compartilhar,
             app.pedido_field,
             "[Compartilhar]",
         ));
@@ -381,7 +381,12 @@ fn render_resumo(
         )));
         lines.push(Line::from(""));
     }
+    let total_quantity = itens.iter().map(|item| item.quantidade).sum::<f64>();
     let total = itens.iter().map(VendaItem::total).sum::<f64>();
+    lines.push(Line::from(format!(
+        "QTD Total: {}",
+        format_quantity(total_quantity)
+    )));
     lines.push(Line::from(format!(
         "Total do Pedido: R${}",
         format_money(total)
@@ -580,9 +585,5 @@ fn money_or_blank(value: &str) -> String {
 }
 
 fn format_quantity(value: f64) -> String {
-    if value.fract() == 0.0 {
-        format!("{value:.0}")
-    } else {
-        format_money(value)
-    }
+    format_money(value)
 }

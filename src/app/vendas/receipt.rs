@@ -107,9 +107,18 @@ if (-not [RawPrinterHelper]::SendBytes($Printer, $bytes)) {
             ));
         }
 
+        let total_quantity = self
+            .venda_itens
+            .iter()
+            .map(|item| item.quantidade)
+            .sum::<f64>();
         let total = self.venda_itens.iter().map(VendaItem::total).sum::<f64>();
         receipt.push_str("----------------------------------------\r\n");
         receipt.push_str("\x1B\x45\x01\x1D\x21\x11");
+        receipt.push_str(&format!(
+            "QTD TOTAL: {}\r\n",
+            format_quantity(total_quantity)
+        ));
         receipt.push_str(&format!("TOTAL: R${}\r\n", format_money(total)));
         receipt.push_str("\x1D\x21\x00\x1B\x45\x00\r\n\r\n\r\n");
         receipt
@@ -121,11 +130,7 @@ fn format_money(value: f64) -> String {
 }
 
 fn format_quantity(value: f64) -> String {
-    if value.fract() == 0.0 {
-        format!("{value:.0}")
-    } else {
-        format_money(value)
-    }
+    format_money(value)
 }
 
 fn normalize_receipt_text(value: &str) -> String {

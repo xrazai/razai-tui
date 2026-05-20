@@ -1,6 +1,7 @@
 pub mod chrome;
 pub mod configuracoes;
 pub mod dados;
+pub mod date_picker;
 pub mod documentos;
 pub mod estoque;
 pub mod pedidos;

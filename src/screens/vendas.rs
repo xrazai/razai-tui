@@ -399,17 +399,22 @@ fn render_resumo(
         ]));
         lines.push(Line::from(""));
     }
+    let total_quantity = itens.iter().map(|item| item.quantidade).sum::<f64>();
     let total = itens.iter().map(VendaItem::total).sum::<f64>();
     lines.push(Line::from(format!(
-        "Total do Pedido: R${}",
+        "QTD Total: {}",
+        format_quantity(total_quantity)
+    )));
+    lines.push(Line::from(format!(
+        "Total da Venda: R${}",
         format_money(total)
     )));
     let widget = Paragraph::new(Text::from(lines)).block(
         Block::default()
             .title(if focused {
-                "Resumo do pedido > Enter editar | Del excluir"
+                "Resumo da venda > Enter editar | Del excluir"
             } else {
-                "Resumo do pedido"
+                "Resumo da venda"
             })
             .borders(Borders::ALL)
             .border_style(if focused {
@@ -432,11 +437,7 @@ fn format_optional_money(value: Option<f64>) -> String {
 }
 
 fn format_quantity(value: f64) -> String {
-    if value.fract() == 0.0 {
-        format!("{value:.0}")
-    } else {
-        format_money(value)
-    }
+    format_money(value)
 }
 
 fn format_field(

@@ -2,6 +2,7 @@ mod sku;
 pub use sku::{build_estampa_vinculo_sku, build_vinculo_sku};
 
 use crate::db::{CorRecord, EstampaRecord, FornecedorRecord, TecidoRecord};
+use chrono::NaiveDate;
 
 mod core;
 pub use core::{AgentAction, AgentDraft, ChatMessage, ChatState, Focus, PedidosScreen};
@@ -25,6 +26,7 @@ pub enum VendaField {
     Quantidade,
     Finalizar,
     Cancelar,
+    Compartilhar,
     Excluir,
 }
 
@@ -90,6 +92,26 @@ pub enum EstoqueView {
     Ordens,
     ResumoFornecedor,
     MaisVendidos,
+}
+
+#[derive(Clone, Copy, Eq, PartialEq)]
+pub enum DateRangeTarget {
+    VendasHistorico,
+    EstoqueResumoFornecedor,
+}
+
+#[derive(Clone, Copy, Eq, PartialEq)]
+pub enum DateRangePhase {
+    Inicio,
+    Fim,
+}
+
+pub struct DateRangePicker {
+    pub target: DateRangeTarget,
+    pub cursor: NaiveDate,
+    pub inicio: Option<NaiveDate>,
+    pub fim: Option<NaiveDate>,
+    pub phase: DateRangePhase,
 }
 
 #[derive(Clone, Copy, Default, Eq, PartialEq)]
