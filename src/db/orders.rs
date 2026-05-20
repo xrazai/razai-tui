@@ -73,7 +73,13 @@ pub async fn list_pedido_itens(
 ) -> Result<Vec<VendaItem>, sqlx::Error> {
     let rows = sqlx::query(
         r#"
-        SELECT descricao, quantidade::float8 AS quantidade, preco_unitario::float8 AS preco_unitario
+        SELECT
+            descricao,
+            quantidade::float8 AS quantidade,
+            preco_unitario::float8 AS preco_unitario,
+            estoque_tecido_id,
+            estoque_item_id,
+            estoque_usa_estampas
         FROM pedido_itens
         WHERE pedido_id = $1
         ORDER BY id
@@ -89,6 +95,9 @@ pub async fn list_pedido_itens(
             descricao: row.get("descricao"),
             quantidade: row.get("quantidade"),
             preco_unitario: row.get("preco_unitario"),
+            estoque_tecido_id: row.get("estoque_tecido_id"),
+            estoque_item_id: row.get("estoque_item_id"),
+            estoque_usa_estampas: row.get("estoque_usa_estampas"),
         })
         .collect())
 }
@@ -127,6 +136,14 @@ pub async fn approve_pedido(pool: &PgPool, pedido_id: i64) -> Result<(), sqlx::E
     Ok(())
 }
 
+pub async fn delete_pedido(pool: &PgPool, pedido_id: i64) -> Result<(), sqlx::Error> {
+    sqlx::query("DELETE FROM pedidos WHERE id = $1")
+        .bind(pedido_id)
+        .execute(pool)
+        .await?;
+    Ok(())
+}
+
 pub async fn update_pedido_pdf_path(
     pool: &PgPool,
     pedido_id: i64,
@@ -153,9 +170,12 @@ async fn insert_pedido_itens(
                 descricao,
                 quantidade,
                 preco_unitario,
-                subtotal
+                subtotal,
+                estoque_tecido_id,
+                estoque_item_id,
+                estoque_usa_estampas
             )
-            VALUES ($1, $2, $3::numeric, $4::numeric, $5::numeric)
+            VALUES ($1, $2, $3::numeric, $4::numeric, $5::numeric, $6, $7, $8)
             "#,
         )
         .bind(pedido_id)
@@ -163,6 +183,9 @@ async fn insert_pedido_itens(
         .bind(item.quantidade)
         .bind(item.preco_unitario)
         .bind(item.total())
+        .bind(item.estoque_tecido_id)
+        .bind(item.estoque_item_id)
+        .bind(item.estoque_usa_estampas)
         .execute(&mut **transaction)
         .await?;
     }

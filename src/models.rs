@@ -1,7 +1,7 @@
 mod sku;
 pub use sku::{build_estampa_vinculo_sku, build_vinculo_sku};
 
-use crate::db::{CorRecord, EstampaRecord, TecidoRecord};
+use crate::db::{CorRecord, EstampaRecord, FornecedorRecord, TecidoRecord};
 
 mod core;
 pub use core::{AgentAction, AgentDraft, ChatMessage, ChatState, Focus, PedidosScreen};
@@ -60,6 +60,9 @@ pub struct VendaItem {
     pub descricao: String,
     pub quantidade: f64,
     pub preco_unitario: f64,
+    pub estoque_tecido_id: Option<i64>,
+    pub estoque_item_id: Option<i64>,
+    pub estoque_usa_estampas: bool,
 }
 
 #[derive(Clone, Copy, Default, Eq, PartialEq)]
@@ -67,6 +70,68 @@ pub enum FinalizarVendaOption {
     #[default]
     Finalizar,
     FinalizarEImprimir,
+}
+
+#[derive(Clone, Copy, Default, Eq, PartialEq)]
+pub enum EstoqueScreen {
+    #[default]
+    Menu,
+    Lista,
+    Detalhe,
+    Movimento,
+    OrdemDetalhe,
+    OrdemFornecedor,
+}
+
+#[derive(Clone, Copy, Default, Eq, PartialEq)]
+pub enum EstoqueView {
+    #[default]
+    Saldos,
+    Ordens,
+    ResumoFornecedor,
+    MaisVendidos,
+}
+
+#[derive(Clone, Copy, Default, Eq, PartialEq)]
+pub enum EstoqueMovimentoTipo {
+    #[default]
+    Entrada,
+    Transferencia,
+}
+
+#[derive(Clone, Copy, Default, Eq, PartialEq)]
+pub enum EstoqueMovimentoField {
+    #[default]
+    Quantidade,
+    Destino,
+    Observacao,
+    Confirmar,
+    Voltar,
+}
+
+impl EstoqueMovimentoField {
+    const ALL: [Self; 5] = [
+        Self::Quantidade,
+        Self::Destino,
+        Self::Observacao,
+        Self::Confirmar,
+        Self::Voltar,
+    ];
+
+    pub fn next(self) -> Self {
+        Self::ALL[(self.index() + 1) % Self::ALL.len()]
+    }
+
+    pub fn previous(self) -> Self {
+        Self::ALL[(self.index() + Self::ALL.len() - 1) % Self::ALL.len()]
+    }
+
+    fn index(self) -> usize {
+        Self::ALL
+            .iter()
+            .position(|field| *field == self)
+            .unwrap_or(0)
+    }
 }
 
 impl FinalizarVendaOption {
@@ -98,6 +163,8 @@ pub enum DadosScreen {
     CadastrarCor,
     Estampas,
     CadastrarEstampa,
+    Fornecedores,
+    CadastrarFornecedor,
     VinculosMenu,
     VinculosSelecionarTecidoCriar,
     VinculosSelecionarTecidoVer,
@@ -248,6 +315,15 @@ pub struct EstampaForm {
     pub nome: String,
 }
 
+#[derive(Default)]
+pub struct FornecedorForm {
+    pub selected_field: FornecedorField,
+    pub nome: String,
+    pub empresa: String,
+    pub telefone: String,
+    pub endereco: String,
+}
+
 impl EstampaForm {
     pub fn push(&mut self, character: char) {
         if self.selected_field == EstampaField::Nome && !character.is_control() {
@@ -285,6 +361,54 @@ impl EstampaForm {
     }
 }
 
+impl FornecedorForm {
+    pub fn push(&mut self, character: char) {
+        if !self.selected_field.is_action() && !character.is_control() {
+            self.current_value_mut().push(character);
+        }
+    }
+
+    pub fn backspace(&mut self) {
+        if !self.selected_field.is_action() {
+            self.current_value_mut().pop();
+        }
+    }
+
+    pub fn next_field(&mut self) {
+        self.selected_field = self.selected_field.next();
+    }
+
+    pub fn previous_field(&mut self) {
+        self.selected_field = self.selected_field.previous();
+    }
+
+    pub fn is_valid(&self) -> bool {
+        !self.nome.trim().is_empty()
+    }
+
+    pub fn from_record(fornecedor: &FornecedorRecord) -> Self {
+        Self {
+            selected_field: FornecedorField::Nome,
+            nome: fornecedor.nome.clone(),
+            empresa: fornecedor.empresa.clone(),
+            telefone: fornecedor.telefone.clone(),
+            endereco: fornecedor.endereco.clone(),
+        }
+    }
+
+    fn current_value_mut(&mut self) -> &mut String {
+        match self.selected_field {
+            FornecedorField::Nome => &mut self.nome,
+            FornecedorField::Empresa => &mut self.empresa,
+            FornecedorField::Telefone => &mut self.telefone,
+            FornecedorField::Endereco => &mut self.endereco,
+            FornecedorField::Confirmar | FornecedorField::Voltar | FornecedorField::Excluir => {
+                unreachable!()
+            }
+        }
+    }
+}
+
 #[derive(Clone, Copy, Default, Eq, PartialEq)]
 pub enum EstampaField {
     #[default]
@@ -292,6 +416,49 @@ pub enum EstampaField {
     Confirmar,
     Voltar,
     Excluir,
+}
+
+#[derive(Clone, Copy, Default, Eq, PartialEq)]
+pub enum FornecedorField {
+    #[default]
+    Nome,
+    Empresa,
+    Telefone,
+    Endereco,
+    Confirmar,
+    Voltar,
+    Excluir,
+}
+
+impl FornecedorField {
+    const ALL: [FornecedorField; 7] = [
+        FornecedorField::Nome,
+        FornecedorField::Empresa,
+        FornecedorField::Telefone,
+        FornecedorField::Endereco,
+        FornecedorField::Confirmar,
+        FornecedorField::Voltar,
+        FornecedorField::Excluir,
+    ];
+
+    pub fn next(self) -> Self {
+        Self::ALL[(self.index() + 1) % Self::ALL.len()]
+    }
+
+    pub fn previous(self) -> Self {
+        Self::ALL[(self.index() + Self::ALL.len() - 1) % Self::ALL.len()]
+    }
+
+    pub fn is_action(self) -> bool {
+        matches!(self, Self::Confirmar | Self::Voltar | Self::Excluir)
+    }
+
+    fn index(self) -> usize {
+        Self::ALL
+            .iter()
+            .position(|field| *field == self)
+            .unwrap_or(0)
+    }
 }
 
 impl EstampaField {
@@ -508,7 +675,8 @@ impl TecidoForm {
             TecidoField::Tipo
             | TecidoField::Transparencia
             | TecidoField::Elasticidade
-            | TecidoField::Acabamento => unreachable!("selects nao possuem texto livre"),
+            | TecidoField::Acabamento
+            | TecidoField::Fornecedor => unreachable!("selects nao possuem texto livre"),
             TecidoField::Rendimento => &mut self.rendimento,
             TecidoField::GramaturaLinear => &mut self.gramatura_linear,
             TecidoField::GramaturaM2 => &mut self.gramatura_m2,
@@ -539,6 +707,7 @@ pub enum TecidoField {
     Transparencia,
     Elasticidade,
     Acabamento,
+    Fornecedor,
     Rendimento,
     GramaturaLinear,
     GramaturaM2,
@@ -548,7 +717,7 @@ pub enum TecidoField {
 }
 
 impl TecidoField {
-    const ALL: [TecidoField; 13] = [
+    const ALL: [TecidoField; 14] = [
         TecidoField::Nome,
         TecidoField::Composicao,
         TecidoField::Largura,
@@ -556,6 +725,7 @@ impl TecidoField {
         TecidoField::Transparencia,
         TecidoField::Elasticidade,
         TecidoField::Acabamento,
+        TecidoField::Fornecedor,
         TecidoField::Rendimento,
         TecidoField::GramaturaLinear,
         TecidoField::GramaturaM2,
@@ -596,6 +766,7 @@ impl TecidoField {
                 | TecidoField::Transparencia
                 | TecidoField::Elasticidade
                 | TecidoField::Acabamento
+                | TecidoField::Fornecedor
                 | TecidoField::Salvar
                 | TecidoField::Voltar
                 | TecidoField::Excluir
@@ -694,15 +865,17 @@ pub enum DadosOption {
     Tecido,
     Cores,
     Estampas,
+    Fornecedor,
     Vinculos,
     ListaPrecos,
 }
 
 impl DadosOption {
-    pub const ALL: [DadosOption; 5] = [
+    pub const ALL: [DadosOption; 6] = [
         DadosOption::Tecido,
         DadosOption::Cores,
         DadosOption::Estampas,
+        DadosOption::Fornecedor,
         DadosOption::Vinculos,
         DadosOption::ListaPrecos,
     ];
@@ -712,6 +885,7 @@ impl DadosOption {
             DadosOption::Tecido => "Tecido",
             DadosOption::Cores => "Cores",
             DadosOption::Estampas => "Estampas",
+            DadosOption::Fornecedor => "Fornecedor",
             DadosOption::Vinculos => "Vinculos",
             DadosOption::ListaPrecos => "Lista de Precos",
         }

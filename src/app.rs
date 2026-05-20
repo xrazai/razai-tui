@@ -19,8 +19,9 @@ use tokio::runtime::Runtime;
 use crate::{
     agent,
     db::{
-        self, CorRecord, EstampaRecord, PedidoRecord, TecidoRecord, VendaHistoricoRecord,
-        VinculoImages, VinculoRecord,
+        self, CorRecord, EstampaRecord, EstoqueMovimentoRecord, EstoqueOrdemRecord,
+        EstoqueSaldoRecord, FornecedorRecord, FornecedorResumoVendaRecord, MaisVendidoRecord,
+        PedidoRecord, TecidoRecord, VendaHistoricoRecord, VinculoImages, VinculoRecord,
     },
     models::*,
     screens, shopee,
@@ -28,12 +29,16 @@ use crate::{
 };
 
 mod agent_actions;
+mod background;
 mod configuracoes;
 mod dados;
 mod documentos;
+mod estoque;
+mod pdf_actions;
 mod pedidos;
 mod vendas;
 
+use background::BackgroundTask;
 use ratatui_image::{picker::Picker, protocol::Protocol as ImageProtocol};
 
 type VinculoThumbnailCacheKey = (i64, i64, bool, VinculoImageSlot);
@@ -44,6 +49,18 @@ struct VinculoImageUploadResult {
     usa_estampas: bool,
     slot: VinculoImageSlot,
     result: Result<(), String>,
+}
+
+struct PedidoPdfResult {
+    pedido_id: i64,
+    compartilhar: bool,
+    pdf_path: Option<String>,
+    status: String,
+}
+
+struct ChecklistPdfResult {
+    pdf_path: Option<String>,
+    status: String,
 }
 
 enum ShopeeTaskResult {
@@ -86,23 +103,26 @@ pub struct App {
     pub vinculo_thumbnail_cache: HashMap<VinculoThumbnailCacheKey, ImageProtocol>,
     pub image_picker: Picker,
     pub image_protocol_status: String,
-    pub vinculo_image_upload_started: Option<Instant>,
-    vinculo_image_upload_rx: Option<Receiver<VinculoImageUploadResult>>,
+    vinculo_image_upload_task: BackgroundTask<VinculoImageUploadResult>,
     pub pending_unlink_vinculo: bool,
     pub vinculo_custo_input: String,
     pub editing_vinculo_custo: bool,
     pub tecidos: Vec<TecidoRecord>,
     pub cores: Vec<CorRecord>,
     pub estampas: Vec<EstampaRecord>,
+    pub fornecedores: Vec<FornecedorRecord>,
     pub vinculos: Vec<VinculoRecord>,
     pub selected_vinculo_cores: Vec<i64>,
     pub tecido_form: TecidoForm,
     pub tecido_select_dropdown: Option<TecidoField>,
+    pub tecido_fornecedor_option: usize,
     pub cor_form: CorForm,
     pub estampa_form: EstampaForm,
+    pub fornecedor_form: FornecedorForm,
     pub editing_tecido_id: Option<i64>,
     pub editing_cor_id: Option<i64>,
     pub editing_estampa_id: Option<i64>,
+    pub editing_fornecedor_id: Option<i64>,
     pub pending_delete: bool,
     pub db_pool: Option<PgPool>,
     pub db_runtime: Runtime,
@@ -118,6 +138,7 @@ pub struct App {
     pub venda_vinculo_option: usize,
     pub venda_field: VendaField,
     pub venda_dropdown: Option<VendaField>,
+    pub venda_preco_option: usize,
     pub venda_preco: String,
     pub venda_quantidade: String,
     pub venda_vinculos: Vec<VinculoRecord>,
@@ -136,24 +157,51 @@ pub struct App {
     pub finalizar_venda_option: FinalizarVendaOption,
     pub pending_delete_venda: bool,
     pub pending_delete_venda_item: bool,
+    pub estoque_screen: EstoqueScreen,
+    pub estoque_view: EstoqueView,
+    pub estoque_saldos: Vec<EstoqueSaldoRecord>,
+    pub estoque_movimentos: Vec<EstoqueMovimentoRecord>,
+    pub estoque_ordens: Vec<EstoqueOrdemRecord>,
+    pub estoque_menu_option: usize,
+    pub estoque_option: usize,
+    pub estoque_ordem_option: usize,
+    pub estoque_ordem_action_option: usize,
+    pub estoque_ordem_fornecedor_option: usize,
+    pub estoque_resumo_fornecedor_option: usize,
+    pub estoque_resumo_field: usize,
+    pub estoque_resumo_inicio: String,
+    pub estoque_resumo_fim: String,
+    pub estoque_resumo_fornecedor: Vec<FornecedorResumoVendaRecord>,
+    pub estoque_mais_vendidos: Vec<MaisVendidoRecord>,
+    pub estoque_movimento_option: usize,
+    pub estoque_movimento_tipo: EstoqueMovimentoTipo,
+    pub estoque_movimento_field: EstoqueMovimentoField,
+    pub estoque_quantidade: String,
+    pub estoque_destino: String,
+    pub estoque_observacao: String,
     pub pedidos_screen: PedidosScreen,
     pub pedido_menu_option: usize,
     pub pedido_tecido_option: usize,
     pub pedido_vinculo_option: usize,
     pub pedido_field: VendaField,
     pub pedido_dropdown: Option<VendaField>,
+    pub pedido_preco_option: usize,
     pub pedido_preco: String,
     pub pedido_quantidade: String,
     pub pedido_vinculos: Vec<VinculoRecord>,
     pub pedido_itens: Vec<VendaItem>,
     pub pedido_resumo_focus: bool,
     pub pedido_item_option: usize,
+    pub editing_pedido_item: Option<usize>,
     pub pedidos_historico: Vec<PedidoRecord>,
     pub pedido_historico_option: usize,
     pub editing_pedido_id: Option<i64>,
     pub finalizar_pedido_dialog: bool,
     pub finalizar_pedido_option: FinalizarVendaOption,
     pub pending_approve_pedido: bool,
+    pub pending_delete_pedido: bool,
+    pedido_pdf_task: BackgroundTask<PedidoPdfResult>,
+    pedido_pdf_task_id: Option<i64>,
     pub shopee_menu_option: usize,
     pub shopee_stock_groups: Vec<shopee::ShopeeStockParentGroup>,
     pub shopee_stock_cursor: usize,
@@ -167,14 +215,12 @@ pub struct App {
     pub shopee_update_confirm: bool,
     pub shopee_update_plans: Vec<shopee::ShopeeListingUpdatePlan>,
     pub shopee_status: String,
-    pub shopee_task_started: Option<Instant>,
-    shopee_task_rx: Option<Receiver<ShopeeTaskResult>>,
+    shopee_task: BackgroundTask<ShopeeTaskResult>,
     pub documentos_option: usize,
     pub checklist_active: bool,
     pub checklist_cursor: usize,
     pub checklist_selected_tecidos: Vec<i64>,
-    pub checklist_pdf_started: Option<Instant>,
-    checklist_pdf_rx: Option<Receiver<String>>,
+    checklist_pdf_task: BackgroundTask<ChecklistPdfResult>,
     pub printers: Vec<String>,
     pub printer_option: usize,
     pub selected_printer: Option<String>,
@@ -190,6 +236,7 @@ impl App {
         tecidos: Vec<TecidoRecord>,
         cores: Vec<CorRecord>,
         estampas: Vec<EstampaRecord>,
+        fornecedores: Vec<FornecedorRecord>,
         selected_printer: Option<String>,
         color_delta_e_threshold: f64,
         vendas_historico: Vec<VendaHistoricoRecord>,
@@ -233,23 +280,26 @@ impl App {
             vinculo_thumbnail_cache: HashMap::new(),
             image_picker,
             image_protocol_status,
-            vinculo_image_upload_started: None,
-            vinculo_image_upload_rx: None,
+            vinculo_image_upload_task: BackgroundTask::default(),
             pending_unlink_vinculo: false,
             vinculo_custo_input: String::new(),
             editing_vinculo_custo: false,
             tecidos,
             cores,
             estampas,
+            fornecedores,
             vinculos: Vec::new(),
             selected_vinculo_cores: Vec::new(),
             tecido_form: TecidoForm::default(),
             tecido_select_dropdown: None,
+            tecido_fornecedor_option: 0,
             cor_form: CorForm::default(),
             estampa_form: EstampaForm::default(),
+            fornecedor_form: FornecedorForm::default(),
             editing_tecido_id: None,
             editing_cor_id: None,
             editing_estampa_id: None,
+            editing_fornecedor_id: None,
             pending_delete: false,
             db_status: if db_pool.is_some() {
                 String::from("Banco local conectado")
@@ -269,6 +319,7 @@ impl App {
             venda_vinculo_option: 0,
             venda_field: VendaField::default(),
             venda_dropdown: None,
+            venda_preco_option: 0,
             venda_preco: String::new(),
             venda_quantidade: String::new(),
             venda_vinculos: Vec::new(),
@@ -281,30 +332,57 @@ impl App {
             venda_historico_option: 0,
             venda_historico_field: 2,
             venda_historico_inicio: today.clone(),
-            venda_historico_fim: today,
+            venda_historico_fim: today.clone(),
             editing_venda_id: None,
             finalizar_venda_dialog: false,
             finalizar_venda_option: FinalizarVendaOption::default(),
             pending_delete_venda: false,
             pending_delete_venda_item: false,
+            estoque_screen: EstoqueScreen::default(),
+            estoque_view: EstoqueView::default(),
+            estoque_saldos: Vec::new(),
+            estoque_movimentos: Vec::new(),
+            estoque_ordens: Vec::new(),
+            estoque_menu_option: 0,
+            estoque_option: 0,
+            estoque_ordem_option: 0,
+            estoque_ordem_action_option: 0,
+            estoque_ordem_fornecedor_option: 0,
+            estoque_resumo_fornecedor_option: 0,
+            estoque_resumo_field: 0,
+            estoque_resumo_inicio: today.clone(),
+            estoque_resumo_fim: today.clone(),
+            estoque_resumo_fornecedor: Vec::new(),
+            estoque_mais_vendidos: Vec::new(),
+            estoque_movimento_option: 0,
+            estoque_movimento_tipo: EstoqueMovimentoTipo::Entrada,
+            estoque_movimento_field: EstoqueMovimentoField::Quantidade,
+            estoque_quantidade: String::new(),
+            estoque_destino: String::new(),
+            estoque_observacao: String::new(),
             pedidos_screen: PedidosScreen::default(),
             pedido_menu_option: 0,
             pedido_tecido_option: 0,
             pedido_vinculo_option: 0,
             pedido_field: VendaField::default(),
             pedido_dropdown: None,
+            pedido_preco_option: 0,
             pedido_preco: String::new(),
             pedido_quantidade: String::new(),
             pedido_vinculos: Vec::new(),
             pedido_itens: Vec::new(),
             pedido_resumo_focus: false,
             pedido_item_option: 0,
+            editing_pedido_item: None,
             pedidos_historico,
             pedido_historico_option: 0,
             editing_pedido_id: None,
             finalizar_pedido_dialog: false,
             finalizar_pedido_option: FinalizarVendaOption::default(),
             pending_approve_pedido: false,
+            pending_delete_pedido: false,
+            pedido_pdf_task: BackgroundTask::default(),
+            pedido_pdf_task_id: None,
             shopee_menu_option: 0,
             shopee_stock_groups: Vec::new(),
             shopee_stock_cursor: 0,
@@ -318,14 +396,12 @@ impl App {
             shopee_update_confirm: false,
             shopee_update_plans: Vec::new(),
             shopee_status,
-            shopee_task_started: None,
-            shopee_task_rx: None,
+            shopee_task: BackgroundTask::default(),
             documentos_option: 0,
             checklist_active: false,
             checklist_cursor: 0,
             checklist_selected_tecidos: Vec::new(),
-            checklist_pdf_started: None,
-            checklist_pdf_rx: None,
+            checklist_pdf_task: BackgroundTask::default(),
             printers,
             printer_option,
             selected_printer,
@@ -343,6 +419,7 @@ impl App {
             self.drain_chat_reply();
             self.drain_vinculo_image_upload();
             self.drain_checklist_pdf();
+            self.drain_pedido_pdf();
             self.drain_shopee_task();
             terminal.draw(|frame| self.render(frame))?;
 
@@ -378,28 +455,73 @@ impl App {
     }
 
     fn drain_checklist_pdf(&mut self) {
-        let status = self
-            .checklist_pdf_rx
-            .as_ref()
-            .and_then(|receiver| receiver.try_recv().ok());
-        if let Some(status) = status {
-            self.checklist_pdf_started = None;
-            self.checklist_pdf_rx = None;
-            self.db_status = status;
+        if let Some(result) = self.checklist_pdf_task.try_recv() {
+            self.db_status = if let Some(path_text) = result.pdf_path.as_deref() {
+                match pdf_actions::print_or_open_pdf(std::path::Path::new(path_text)) {
+                    Ok(pdf_actions::PrintPdfOutcome::Printed) => {
+                        format!("Checklist gerado e enviado para a tela de impressao: {path_text}")
+                    }
+                    Ok(pdf_actions::PrintPdfOutcome::Opened { print_error }) => {
+                        format!(
+                            "Checklist gerado em {path_text}. Impressao indisponivel ({print_error}); PDF aberto."
+                        )
+                    }
+                    Err(error) => {
+                        format!(
+                            "Checklist gerado em {path_text}. Falha ao abrir impressao/PDF: {error}"
+                        )
+                    }
+                }
+            } else {
+                result.status
+            };
+        }
+    }
+
+    fn drain_pedido_pdf(&mut self) {
+        if let Some(result) = self.pedido_pdf_task.try_recv() {
+            if self.pedido_pdf_task_id == Some(result.pedido_id) {
+                self.pedido_pdf_task_id = None;
+            }
+            let mut reload_error = None;
+            if let Some(pool) = &self.db_pool {
+                match self.db_runtime.block_on(db::list_pedidos(pool)) {
+                    Ok(pedidos) => self.pedidos_historico = pedidos,
+                    Err(error) => {
+                        reload_error = Some(format!(" Erro ao recarregar pedidos: {error}"));
+                    }
+                }
+            }
+            self.db_status = if result.compartilhar {
+                if let Some(path_text) = result.pdf_path.as_deref() {
+                    match self.abrir_compartilhamento_pedido(result.pedido_id, path_text) {
+                        Ok(()) => format!(
+                            "Pedido #{} gerado. Compartilhamento aberto: {path_text}{}",
+                            result.pedido_id,
+                            reload_error.unwrap_or_default()
+                        ),
+                        Err(error) => {
+                            format!(
+                                "{error} PDF salvo em: {path_text}{}",
+                                reload_error.unwrap_or_default()
+                            )
+                        }
+                    }
+                } else {
+                    format!("{}{}", result.status, reload_error.unwrap_or_default())
+                }
+            } else {
+                format!("{}{}", result.status, reload_error.unwrap_or_default())
+            };
+        } else if self.pedido_pdf_task_id.is_some() && !self.pedido_pdf_task.is_running() {
+            self.pedido_pdf_task_id = None;
         }
     }
 
     fn drain_shopee_task(&mut self) {
-        let result = self
-            .shopee_task_rx
-            .as_ref()
-            .and_then(|receiver| receiver.try_recv().ok());
-        let Some(result) = result else {
+        let Some(result) = self.shopee_task.try_recv() else {
             return;
         };
-
-        self.shopee_task_started = None;
-        self.shopee_task_rx = None;
 
         match result {
             ShopeeTaskResult::StockFetch(Ok(groups)) => {
@@ -481,8 +603,30 @@ impl App {
             return;
         }
 
+        if self.section == Section::Dados
+            && self.dados_screen == DadosScreen::ListaPrecosTecido
+            && self.handle_lista_precos_tecido_selected_value_key(key.code)
+        {
+            return;
+        }
+
         if matches!(key.code, KeyCode::Tab | KeyCode::BackTab) {
             self.handle_focus_tab(key.code);
+            return;
+        }
+
+        if self.section == Section::Estoque && self.estoque_screen == EstoqueScreen::Movimento {
+            self.handle_estoque_key(key.code);
+            return;
+        }
+        if self.section == Section::Estoque
+            && self.estoque_screen == EstoqueScreen::Lista
+            && matches!(
+                self.estoque_view,
+                EstoqueView::ResumoFornecedor | EstoqueView::MaisVendidos
+            )
+        {
+            self.handle_estoque_key(key.code);
             return;
         }
 
@@ -511,12 +655,20 @@ impl App {
             self.handle_estampa_form_key(key.code);
             return;
         }
+        if self.section == Section::Dados && self.dados_screen == DadosScreen::CadastrarFornecedor {
+            self.handle_fornecedor_form_key(key.code);
+            return;
+        }
         if self.section == Section::Vendas {
             self.handle_vendas_key(key.code);
             return;
         }
         if self.section == Section::Pedidos {
             self.handle_pedidos_key(key.code);
+            return;
+        }
+        if self.section == Section::Estoque {
+            self.handle_estoque_key(key.code);
             return;
         }
         if self.section == Section::Shopee {
@@ -571,6 +723,7 @@ impl App {
                 DadosScreen::Tecidos => self.previous_tecido(),
                 DadosScreen::Cores => self.previous_cor(),
                 DadosScreen::Estampas => self.previous_cor(),
+                DadosScreen::Fornecedores => self.previous_cor(),
                 DadosScreen::VinculosMenu => self.previous_vinculo_menu(),
                 DadosScreen::VinculosSelecionarTecidoCriar
                 | DadosScreen::VinculosSelecionarTecidoVer => self.previous_vinculo_tecido(),
@@ -585,13 +738,15 @@ impl App {
                 DadosScreen::ListaPrecosVinculos => self.previous_lista_precos_vinculo(),
                 DadosScreen::CadastrarTecido
                 | DadosScreen::CadastrarCor
-                | DadosScreen::CadastrarEstampa => {}
+                | DadosScreen::CadastrarEstampa
+                | DadosScreen::CadastrarFornecedor => {}
             },
             KeyCode::Down if self.section == Section::Dados => match self.dados_screen {
                 DadosScreen::Menu => self.dados_option = self.dados_option.next(),
                 DadosScreen::Tecidos => self.next_tecido(),
                 DadosScreen::Cores => self.next_cor(),
                 DadosScreen::Estampas => self.next_cor(),
+                DadosScreen::Fornecedores => self.next_cor(),
                 DadosScreen::VinculosMenu => self.next_vinculo_menu(),
                 DadosScreen::VinculosSelecionarTecidoCriar
                 | DadosScreen::VinculosSelecionarTecidoVer => self.next_vinculo_tecido(),
@@ -606,7 +761,8 @@ impl App {
                 DadosScreen::ListaPrecosVinculos => self.next_lista_precos_vinculo(),
                 DadosScreen::CadastrarTecido
                 | DadosScreen::CadastrarCor
-                | DadosScreen::CadastrarEstampa => {}
+                | DadosScreen::CadastrarEstampa
+                | DadosScreen::CadastrarFornecedor => {}
             },
             KeyCode::Enter if self.section == Section::Dados => {
                 if self.dados_screen == DadosScreen::Menu {
@@ -621,6 +777,10 @@ impl App {
                         }
                         DadosOption::Estampas => {
                             self.dados_screen = DadosScreen::Estampas;
+                            self.cor_option = 0;
+                        }
+                        DadosOption::Fornecedor => {
+                            self.dados_screen = DadosScreen::Fornecedores;
                             self.cor_option = 0;
                         }
                         DadosOption::Vinculos => {
@@ -649,6 +809,12 @@ impl App {
                         self.open_new_estampa();
                     } else {
                         self.open_edit_estampa(self.cor_option - 1);
+                    }
+                } else if self.dados_screen == DadosScreen::Fornecedores {
+                    if self.cor_option == 0 {
+                        self.open_new_fornecedor();
+                    } else {
+                        self.open_edit_fornecedor(self.cor_option - 1);
                     }
                 } else if self.dados_screen == DadosScreen::VinculosMenu {
                     if self.vinculo_menu_option == 0 {
@@ -765,7 +931,7 @@ impl App {
     }
 
     fn handle_shopee_key(&mut self, key: KeyCode) {
-        if self.shopee_task_rx.is_some() {
+        if self.shopee_task.is_running() {
             match key {
                 KeyCode::Left => self.section = self.section.previous(),
                 KeyCode::Right => self.section = self.section.next(),
@@ -1060,14 +1226,9 @@ impl App {
     where
         F: FnOnce() -> ShopeeTaskResult + Send + 'static,
     {
-        let (tx, rx) = mpsc::channel();
-        self.shopee_task_started = Some(Instant::now());
-        self.shopee_task_rx = Some(rx);
         self.shopee_status = status.to_string();
         self.db_status = self.shopee_status.clone();
-        thread::spawn(move || {
-            let _ = tx.send(task());
-        });
+        self.shopee_task.start(task);
     }
 
     fn start_shopee_stock_fetch(&mut self) {
@@ -1350,7 +1511,7 @@ impl App {
         let pedido_total = self.pedido_itens.iter().map(VendaItem::total).sum::<f64>();
 
         format!(
-            "Projeto Razai TUI: sistema terminal para loja de tecidos com Dashboard, Vendas, Pedidos, Dados, Estoque, Shopee, Documentos e Configuracoes. Tela atual: {}. Status: {}. Dados carregados: {} tecidos, {} cores, {} estampas, {} vendas no periodo {}..{}, {} pedidos. Tecidos: {}. Cores: {}. Estampas: {}. Vendas recentes: {}. Pedidos recentes: {}. Venda em andamento: {} itens, total R${}, preco='{}', quantidade='{}'. Pedido em andamento: {} itens, total R${}, preco='{}', quantidade='{}'. Impressora: {}. Formulario tecido: nome='{}', composicao='{}', largura='{}', tipo='{}'. Custo base fica em Dados > Lista de Precos > Custo Base. Regras: gravacoes exigem confirmacao; vendas viram historico; pedidos geram PDF em pdf_pedidos e podem ser aprovados como venda; documentos geram checklist PDF fora do workspace em Documents\\Razai\\checklists.",
+            "Projeto Razai TUI: sistema terminal para loja de tecidos com Dashboard, Vendas, Pedidos, Dados, Estoque, Shopee, Documentos e Configuracoes. Tela atual: {}. Status: {}. Dados carregados: {} tecidos, {} cores, {} estampas, {} vendas no periodo {}..{}, {} pedidos. Tecidos: {}. Cores: {}. Estampas: {}. Vendas recentes: {}. Pedidos recentes: {}. Venda em andamento: {} itens, total R${}, preco='{}', quantidade='{}'. Pedido em andamento: {} itens, total R${}, preco='{}', quantidade='{}'. Impressora: {}. Formulario tecido: nome='{}', composicao='{}', largura='{}', tipo='{}'. Custo base fica em Dados > Lista de Precos > Custo Base. Regras: gravacoes exigem confirmacao; vendas viram historico; pedidos geram PDF fora do workspace em Documents\\Razai\\pedidos e podem ser aprovados como venda; documentos geram checklist PDF fora do workspace em Documents\\Razai\\checklists.",
             self.section.title(),
             self.db_status,
             self.tecidos.len(),
@@ -1413,6 +1574,7 @@ impl App {
             Section::Vendas => screens::vendas::render(frame, body[0], self),
             Section::Pedidos => screens::pedidos::render(frame, body[0], self),
             Section::Dados => screens::dados::render(frame, body[0], self),
+            Section::Estoque => screens::estoque::render(frame, body[0], self),
             Section::Shopee => screens::shopee::render(
                 frame,
                 body[0],
@@ -1446,6 +1608,14 @@ impl App {
             );
         }
         screens::chrome::render_footer(frame, outer[3], &self.db_status, self.focus);
+    }
+
+    pub fn vinculo_image_upload_started(&self) -> Option<Instant> {
+        self.vinculo_image_upload_task.started_at()
+    }
+
+    pub fn pedido_pdf_started(&self) -> Option<Instant> {
+        self.pedido_pdf_task.started_at()
     }
 
     fn active_context(&self) -> agent::AgentContext {

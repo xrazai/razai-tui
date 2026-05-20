@@ -11,8 +11,9 @@ use crate::{
     db::{TecidoRecord, VinculoRecord},
     models::{FinalizarVendaOption, VendaField, VendaItem, VendasScreen},
     ui::{
-        DIALOG_BG, SIDE_PANEL_WIDTH, centered_rect, color_swatch, list_state_with_lookahead,
-        render_dialog_background, selected_style,
+        DIALOG_BG, SIDE_PANEL_WIDTH, centered_rect, color_swatch, destructive_action_line,
+        list_state_with_lookahead, render_destructive_confirm_dialog, render_dialog_background,
+        selected_style, table_cell, table_cell_right,
     },
 };
 
@@ -77,10 +78,15 @@ pub fn render(frame: &mut Frame, area: Rect, app: &App) {
         );
     }
     if app.pending_delete_venda {
-        render_excluir_dialog(frame, area);
+        render_destructive_confirm_dialog(frame, area, "Confirmar exclusao", "Excluir esta venda?");
     }
     if app.pending_delete_venda_item {
-        render_excluir_item_dialog(frame, area);
+        render_destructive_confirm_dialog(
+            frame,
+            area,
+            "Confirmar exclusao",
+            "Excluir este lancamento?",
+        );
     }
 }
 
@@ -112,21 +118,26 @@ fn render_historico(
     let items = if vendas.is_empty() {
         vec![ListItem::new("Nenhuma venda finalizada.")]
     } else {
-        vendas
-            .iter()
-            .map(|venda| {
-                ListItem::new(format!(
-                    "#{}  {}  {} itens  Total R${}",
-                    venda.id,
-                    venda.created_at,
-                    venda.itens,
-                    format_money(venda.total)
-                ))
-            })
-            .collect()
+        let mut items = vec![ListItem::new(Line::from(format!(
+            "{} {} {} {}",
+            table_cell_right("#", 6),
+            table_cell("Data", 19),
+            table_cell_right("Itens", 7),
+            table_cell_right("Total", 14)
+        )))];
+        items.extend(vendas.iter().map(|venda| {
+            ListItem::new(Line::from(format!(
+                "{} {} {} {}",
+                table_cell_right(&format!("#{}", venda.id), 6),
+                table_cell(&venda.created_at.to_string(), 19),
+                table_cell_right(&venda.itens.to_string(), 7),
+                table_cell_right(&format!("R${}", format_money(venda.total)), 14)
+            )))
+        }));
+        items
     };
     let mut state = list_state_with_lookahead(
-        (!vendas.is_empty() && selected_field == 2).then_some(selected),
+        (!vendas.is_empty() && selected_field == 2).then_some(selected + 1),
         items.len(),
         chunks[1],
     );
@@ -172,11 +183,37 @@ fn render_menu(frame: &mut Frame, area: Rect, selected: usize) {
 }
 
 fn render_tecidos(frame: &mut Frame, area: Rect, selected: usize, tecidos: &[TecidoRecord]) {
-    let items = tecidos
-        .iter()
-        .enumerate()
-        .map(|(index, tecido)| ListItem::new(format!("{}. {}", index + 1, tecido.nome)));
-    let mut state = list_state_with_lookahead(Some(selected), tecidos.len(), area);
+    let items = if tecidos.is_empty() {
+        vec![ListItem::new("Nenhum tecido cadastrado.")]
+    } else {
+        let mut items = vec![ListItem::new(Line::from(format!(
+            "{} {} {} {}",
+            table_cell_right("#", 4),
+            table_cell("SKU", 6),
+            table_cell("Tecido", 28),
+            table_cell("Tipo", 12)
+        )))];
+        items.extend(tecidos.iter().enumerate().map(|(index, tecido)| {
+            ListItem::new(Line::from(vec![
+                Span::raw(format!(
+                    "{} ",
+                    table_cell_right(&(index + 1).to_string(), 4)
+                )),
+                Span::styled(
+                    format!("{} ", table_cell(&tecido.sku, 6)),
+                    Style::default().fg(Color::Yellow),
+                ),
+                Span::raw(format!("{} ", table_cell(&tecido.nome, 28))),
+                Span::raw(table_cell(&tecido.tipo, 12)),
+            ]))
+        }));
+        items
+    };
+    let mut state = list_state_with_lookahead(
+        (!tecidos.is_empty()).then_some(selected + 1),
+        items.len(),
+        area,
+    );
     let list = List::new(items)
         .block(
             Block::default()
@@ -192,21 +229,42 @@ fn render_vinculos(frame: &mut Frame, area: Rect, selected: usize, vinculos: &[V
     let items = if vinculos.is_empty() {
         vec![ListItem::new("Nenhum vinculo cadastrado para este tecido.")]
     } else {
-        vinculos
-            .iter()
-            .enumerate()
-            .map(|(index, vinculo)| {
-                let sku = vinculo.sku.as_deref().unwrap_or("sem-sku");
-                let hex = vinculo.cor_hex.as_deref().unwrap_or("#");
-                ListItem::new(Line::from(vec![
-                    Span::raw(format!("{}. {} - ", index + 1, sku)),
-                    color_swatch(hex),
-                    Span::raw(format!(" {}", vinculo.cor_nome)),
-                ]))
-            })
-            .collect()
+        let mut items = vec![ListItem::new(Line::from(format!(
+            "{} {} {} {} {}",
+            table_cell_right("#", 4),
+            table_cell("SKU", 12),
+            table_cell("Cor", 18),
+            table_cell_right("Atacado", 12),
+            table_cell_right("Varejo", 12)
+        )))];
+        items.extend(vinculos.iter().enumerate().map(|(index, vinculo)| {
+            let sku = vinculo.sku.as_deref().unwrap_or("sem-sku");
+            let hex = vinculo.cor_hex.as_deref().unwrap_or("#");
+            ListItem::new(Line::from(vec![
+                Span::raw(format!(
+                    "{} ",
+                    table_cell_right(&(index + 1).to_string(), 4)
+                )),
+                Span::raw(format!("{} ", table_cell(sku, 12))),
+                color_swatch(hex),
+                Span::raw(format!(" {} ", table_cell(&vinculo.cor_nome, 15))),
+                Span::raw(format!(
+                    "{} ",
+                    table_cell_right(&format_optional_money(vinculo.preco_atacado_efetivo), 12)
+                )),
+                Span::raw(table_cell_right(
+                    &format_optional_money(vinculo.preco_varejo_efetivo),
+                    12,
+                )),
+            ]))
+        }));
+        items
     };
-    let mut state = list_state_with_lookahead(Some(selected), items.len(), area);
+    let mut state = list_state_with_lookahead(
+        (!vinculos.is_empty()).then_some(selected + 1),
+        items.len(),
+        area,
+    );
     let list = List::new(items)
         .block(
             Block::default()
@@ -261,8 +319,16 @@ fn render_lancamento(
         )));
     }
     lines.push(Line::from(""));
+    lines.push(format_select(
+        VendaField::Preco,
+        field,
+        "Preco Unitario",
+        &preco_option_label(app.venda_preco_option, preco),
+    ));
+    if app.venda_dropdown == Some(VendaField::Preco) {
+        push_preco_options(&mut lines, vinculo, app.venda_preco_option, preco);
+    }
     lines.extend([
-        format_field(VendaField::Preco, field, "Preco Unitario", preco),
         format_field(
             VendaField::Quantidade,
             field,
@@ -287,7 +353,11 @@ fn render_lancamento(
         format_action(VendaField::Cancelar, field, "[Cancelar]", true),
     ]);
     if app.editing_venda_id.is_some() {
-        lines.push(format_action(VendaField::Excluir, field, "[Excluir]", true));
+        lines.push(format_destructive_action(
+            VendaField::Excluir,
+            field,
+            "[Excluir]",
+        ));
     }
     let widget = Paragraph::new(Text::from(lines)).block(
         Block::default()
@@ -353,6 +423,12 @@ fn render_resumo(
 
 fn format_money(value: f64) -> String {
     format!("{value:.2}").replace('.', ",")
+}
+
+fn format_optional_money(value: Option<f64>) -> String {
+    value
+        .map(format_money)
+        .unwrap_or_else(|| String::from("nao definido"))
 }
 
 fn format_quantity(value: f64) -> String {
@@ -432,6 +508,63 @@ fn push_vinculo_options(
     }
 }
 
+fn push_preco_options(
+    lines: &mut Vec<Line<'static>>,
+    vinculo: Option<&VinculoRecord>,
+    selected: usize,
+    manual: &str,
+) {
+    for option in 0..3 {
+        let is_current = option == selected;
+        lines.push(Line::from(vec![
+            Span::styled(
+                if is_current { "  > " } else { "    " },
+                selected_style(is_current),
+            ),
+            Span::styled(
+                format!("[{}]", preco_option_label_for(vinculo, option, manual)),
+                Style::default().fg(Color::Yellow),
+            ),
+        ]));
+    }
+}
+
+fn preco_option_label(selected: usize, manual: &str) -> String {
+    match selected {
+        0 => format!("Atacado R$ {}", money_or_blank(manual)),
+        1 => format!("Varejo R$ {}", money_or_blank(manual)),
+        _ => format!("Manual R$ {}", money_or_blank(manual)),
+    }
+}
+
+fn preco_option_label_for(vinculo: Option<&VinculoRecord>, option: usize, _manual: &str) -> String {
+    match option {
+        0 => format!(
+            "Atacado R$ {}",
+            option_money(vinculo.and_then(|vinculo| vinculo.preco_atacado_efetivo))
+        ),
+        1 => format!(
+            "Varejo R$ {}",
+            option_money(vinculo.and_then(|vinculo| vinculo.preco_varejo_efetivo))
+        ),
+        _ => String::from("Manual R$ _"),
+    }
+}
+
+fn option_money(value: Option<f64>) -> String {
+    value
+        .map(format_money)
+        .unwrap_or_else(|| String::from("nao definido"))
+}
+
+fn money_or_blank(value: &str) -> String {
+    if value.is_empty() {
+        String::from("_")
+    } else {
+        value.to_string()
+    }
+}
+
 fn format_action(
     field: VendaField,
     selected: VendaField,
@@ -507,44 +640,10 @@ fn render_finalizar_dialog(
     frame.render_widget(dialog, popup_area);
 }
 
-fn render_excluir_dialog(frame: &mut Frame, area: Rect) {
-    let popup_area = centered_rect(48, 7, area);
-    render_dialog_background(frame, popup_area);
-    let dialog = Paragraph::new(Text::from(vec![
-        Line::from("Excluir esta venda?"),
-        Line::from(""),
-        Line::from("[Enter/S] Confirmar   [Esc/N] Voltar"),
-    ]))
-    .block(
-        Block::default()
-            .title("Confirmar exclusao")
-            .borders(Borders::ALL)
-            .style(Style::default().bg(DIALOG_BG))
-            .border_style(Style::default().fg(Color::Red)),
-    )
-    .style(Style::default().bg(DIALOG_BG))
-    .alignment(Alignment::Center);
-
-    frame.render_widget(dialog, popup_area);
-}
-
-fn render_excluir_item_dialog(frame: &mut Frame, area: Rect) {
-    let popup_area = centered_rect(48, 7, area);
-    render_dialog_background(frame, popup_area);
-    let dialog = Paragraph::new(Text::from(vec![
-        Line::from("Excluir este lancamento?"),
-        Line::from(""),
-        Line::from("[Enter/S] Confirmar   [Esc/N] Voltar"),
-    ]))
-    .block(
-        Block::default()
-            .title("Confirmar exclusao")
-            .borders(Borders::ALL)
-            .style(Style::default().bg(DIALOG_BG))
-            .border_style(Style::default().fg(Color::Red)),
-    )
-    .style(Style::default().bg(DIALOG_BG))
-    .alignment(Alignment::Center);
-
-    frame.render_widget(dialog, popup_area);
+fn format_destructive_action(
+    field: VendaField,
+    selected: VendaField,
+    label: &str,
+) -> Line<'static> {
+    destructive_action_line(field, selected, label)
 }

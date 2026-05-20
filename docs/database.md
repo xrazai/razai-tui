@@ -30,14 +30,36 @@ As migrations ficam em `migrations/`. Na primeira vez que o container sobe, o Po
 
 Tabelas principais:
 
-- `tecidos`: tecidos cadastrados, SKU, composicao, largura, custo base, precos de venda, tipo e gramaturas.
+- `tecidos`: tecidos cadastrados, SKU, composicao, largura, custo base, precos de venda, tipo, gramaturas e fornecedor opcional.
 - `cores`: cores cadastradas, hexadecimal, swatch derivado e SKU.
 - `estampas`: estampas cadastradas e SKU.
+- `fornecedores`: fornecedores cadastrados para associar a tecidos e relatorios.
 - `tecido_cores`: vinculos de tecidos lisos com cores.
 - `tecido_estampas`: vinculos de tecidos estampados com estampas.
+- `vendas` e `venda_itens`: historico de vendas e itens, incluindo identidade de estoque do vinculo vendido.
+- `pedidos` e `pedido_itens`: pedidos pendentes/aprovados, PDF salvo e itens com identidade de estoque.
+- `estoque_movimentacoes`: fonte de verdade do saldo de estoque por vinculo.
+- `estoque_ordens`: pendencias automaticas de falta de estoque para direcionamento a fornecedor.
 - `configuracoes`: configuracoes locais persistidas no banco, como impressora de recibos e limiar Delta E de cores.
 
-O app tambem garante em runtime as tabelas `configuracoes`, `estampas` e `tecido_estampas`, alem das colunas `tecidos.custo_base`, `tecidos.preco_atacado`, `tecidos.preco_varejo`, `custo_override` e overrides de preco nos vinculos, porque bancos locais antigos podem ter sido criados antes dessas migrations.
+O app tambem garante em runtime as tabelas e colunas recentes, como `fornecedores`, `configuracoes`, `estampas`, `tecido_estampas`, `estoque_movimentacoes`, `estoque_ordens`, `tecidos.fornecedor_id`, `tecidos.custo_base`, `tecidos.preco_atacado`, `tecidos.preco_varejo`, `custo_override` e overrides de preco nos vinculos, porque bancos locais antigos podem ter sido criados antes dessas migrations.
+
+## Estoque
+
+`estoque_movimentacoes` registra todas as entradas e saidas:
+
+- `entrada`: quantidade positiva criada manualmente.
+- `saida_venda`: quantidade negativa criada ao salvar venda ou aprovar pedido.
+- `saida_transferencia`: quantidade negativa criada manualmente para transferencia.
+
+O saldo nao fica duplicado em tabela fixa; ele e calculado por `SUM(quantidade)` agrupado por `tecido_id`, `item_id` e `usa_estampas`.
+
+`estoque_ordens` e uma pendencia operacional, nao uma movimentacao. Ela e criada quando uma saida de venda excede o saldo disponivel antes da baixa. Campos principais: vinculo, quantidade faltante, status (`pendente`, `direcionada`, `concluida`, `cancelada`), fornecedor opcional e `venda_id` de origem. Editar ou excluir venda remove/recalcula as ordens automaticas daquela venda.
+
+Relatorios:
+
+- `Resumo fornecedor`: filtra vendas por `tecidos.fornecedor_id` e periodo, somando quantidade vendida e custo vendido.
+- `Mais vendidos`: agrupa vendas por vinculo vendido e ordena por quantidade.
 
 ## Imagens de Vinculos
 

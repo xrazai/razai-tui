@@ -34,6 +34,7 @@ pub async fn insert_venda(pool: &PgPool, itens: &[VendaItem]) -> Result<i64, sql
     let venda_id: i64 = row.get("id");
 
     insert_venda_itens(&mut transaction, venda_id, itens).await?;
+    crate::db::reset_sale_stock_movements(&mut transaction, venda_id, itens).await?;
     transaction.commit().await?;
     Ok(venda_id)
 }
@@ -99,22 +100,39 @@ pub async fn update_venda(
         .await?;
 
     insert_venda_itens(&mut transaction, venda_id, itens).await?;
+    crate::db::reset_sale_stock_movements(&mut transaction, venda_id, itens).await?;
     transaction.commit().await?;
     Ok(())
 }
 
 pub async fn delete_venda(pool: &PgPool, venda_id: i64) -> Result<(), sqlx::Error> {
+    let mut transaction = pool.begin().await?;
+    sqlx::query("DELETE FROM estoque_movimentacoes WHERE venda_id = $1")
+        .bind(venda_id)
+        .execute(&mut *transaction)
+        .await?;
+    sqlx::query("DELETE FROM estoque_ordens WHERE venda_id = $1")
+        .bind(venda_id)
+        .execute(&mut *transaction)
+        .await?;
     sqlx::query("DELETE FROM vendas WHERE id = $1")
         .bind(venda_id)
-        .execute(pool)
+        .execute(&mut *transaction)
         .await?;
+    transaction.commit().await?;
     Ok(())
 }
 
 pub async fn list_venda_itens(pool: &PgPool, venda_id: i64) -> Result<Vec<VendaItem>, sqlx::Error> {
     let rows = sqlx::query(
         r#"
-        SELECT descricao, quantidade::float8 AS quantidade, preco_unitario::float8 AS preco_unitario
+        SELECT
+            descricao,
+            quantidade::float8 AS quantidade,
+            preco_unitario::float8 AS preco_unitario,
+            estoque_tecido_id,
+            estoque_item_id,
+            estoque_usa_estampas
         FROM venda_itens
         WHERE venda_id = $1
         ORDER BY id
@@ -130,6 +148,9 @@ pub async fn list_venda_itens(pool: &PgPool, venda_id: i64) -> Result<Vec<VendaI
             descricao: row.get("descricao"),
             quantidade: row.get("quantidade"),
             preco_unitario: row.get("preco_unitario"),
+            estoque_tecido_id: row.get("estoque_tecido_id"),
+            estoque_item_id: row.get("estoque_item_id"),
+            estoque_usa_estampas: row.get("estoque_usa_estampas"),
         })
         .collect())
 }
@@ -147,9 +168,12 @@ async fn insert_venda_itens(
                 descricao,
                 quantidade,
                 preco_unitario,
-                subtotal
+                subtotal,
+                estoque_tecido_id,
+                estoque_item_id,
+                estoque_usa_estampas
             )
-            VALUES ($1, $2, $3::numeric, $4::numeric, $5::numeric)
+            VALUES ($1, $2, $3::numeric, $4::numeric, $5::numeric, $6, $7, $8)
             "#,
         )
         .bind(venda_id)
@@ -157,6 +181,9 @@ async fn insert_venda_itens(
         .bind(item.quantidade)
         .bind(item.preco_unitario)
         .bind(item.total())
+        .bind(item.estoque_tecido_id)
+        .bind(item.estoque_item_id)
+        .bind(item.estoque_usa_estampas)
         .execute(&mut **transaction)
         .await?;
     }

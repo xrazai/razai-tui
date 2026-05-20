@@ -3048,6 +3048,8 @@ mod tests {
             transparencia: String::from("Media"),
             elasticidade: String::from("Baixa"),
             acabamento: String::from("Fosco"),
+            fornecedor_id: None,
+            fornecedor_nome: None,
         }
     }
 

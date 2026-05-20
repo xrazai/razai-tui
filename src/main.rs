@@ -24,8 +24,10 @@ fn main() -> io::Result<()> {
     let pool = db_runtime.block_on(db::connect()).ok();
     if let Some(pool) = &pool {
         let _ = db_runtime.block_on(db::ensure_configuracoes_table(pool));
+        let _ = db_runtime.block_on(db::ensure_fornecedores_table(pool));
         let _ = db_runtime.block_on(db::ensure_estampas_tables(pool));
         let _ = db_runtime.block_on(db::ensure_vendas_tables(pool));
+        let _ = db_runtime.block_on(db::ensure_estoque_tables(pool));
         let _ = db_runtime.block_on(db::ensure_pedidos_tables(pool));
         let _ = db_runtime.block_on(db::ensure_tecido_custo_base_column(pool));
         let _ = db_runtime.block_on(db::ensure_vinculo_image_columns(pool));
@@ -45,6 +47,12 @@ fn main() -> io::Result<()> {
     let estampas = match &pool {
         Some(pool) => db_runtime
             .block_on(db::list_estampas(pool))
+            .unwrap_or_default(),
+        None => Vec::new(),
+    };
+    let fornecedores = match &pool {
+        Some(pool) => db_runtime
+            .block_on(db::list_fornecedores(pool))
             .unwrap_or_default(),
         None => Vec::new(),
     };
@@ -89,11 +97,12 @@ fn main() -> io::Result<()> {
 
     let mut terminal = setup_terminal()?;
     let (image_picker, image_protocol_status) = detect_image_picker();
-    let app_result = App::new(
+    let mut app = App::new(
         pool,
         tecidos,
         cores,
         estampas,
+        fornecedores,
         selected_printer,
         color_delta_e_threshold,
         vendas_historico,
@@ -102,8 +111,10 @@ fn main() -> io::Result<()> {
         image_picker,
         image_protocol_status,
         db_runtime,
-    )
-    .run(&mut terminal);
+    );
+    app.reload_estoque_saldos();
+    app.reload_estoque_ordens();
+    let app_result = app.run(&mut terminal);
     restore_terminal(&mut terminal)?;
     app_result
 }

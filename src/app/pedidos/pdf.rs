@@ -529,6 +529,9 @@ mod tests {
                 descricao: format!("Tecido {index:02} - Cor Especial {index:02}"),
                 quantidade: (index % 9 + 1) as f64,
                 preco_unitario: 10.0 + index as f64 * 0.73,
+                estoque_tecido_id: None,
+                estoque_item_id: None,
+                estoque_usa_estampas: false,
             })
             .collect::<Vec<_>>();
         let path = std::env::temp_dir().join(format!("razai_pedido_ibm_plex_preview_{count}.pdf"));

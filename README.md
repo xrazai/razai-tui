@@ -54,6 +54,7 @@ Notas:
 - Acoes visuais entre colchetes, como `[Confirmar]`, `[Voltar]`, `[Gerar PDF]` e `[Desfazer Vinculo]`, devem ficar separadas do conteudo/listagem por pelo menos uma linha vazia quando dividirem a tela com dados de contexto.
 - Essa separacao deve ser feita com uma linha/item vazio proprio e mapeamento correto da selecao. Nao coloque `\n` dentro do texto do item selecionavel, porque isso quebra o destaque visual do `ratatui`.
 - Menus compostos apenas por acoes podem permanecer compactos, desde que nao estejam misturados com uma listagem de dados.
+- Acoes destrutivas persistidas aparecem em vermelho, ficam no fim do grupo de acoes e sempre pedem confirmacao. `Cancelar` abandona apenas edicao temporaria; remocao/desativacao persistida usa rotulo explicito como `[Excluir]`, `[Cancelar Pedido]` ou `[Desfazer Vinculo]`.
 
 ## Abas
 
@@ -61,18 +62,19 @@ Notas:
 - `Vendas`: nova venda, historico, edicao e exclusao.
 - `Pedidos`: novo pedido, historico, PDF, compartilhamento nativo do Windows e aprovacao para virar venda.
 - `Dados`: cadastros e vinculos.
-- `Estoque`: reservado para estoque.
+- `Estoque`: saldos por vinculo, movimentacoes, ordens de estoque e relatorios.
 - `Shopee`: conexao Shopee, criacao de anuncio, estoque online por SKU e guia BR.
 - `Documentos`: emissao de documentos operacionais, como checklist de vinculos em PDF.
 - `Configuracoes`: impressora de recibos.
 
 ## Dados
 
-`Dados` possui quatro fluxos:
+`Dados` possui cinco fluxos:
 
 - `Tecido`: cadastro e edicao de tecidos.
 - `Cores`: cadastro e edicao de cores com hexadecimal, swatch e SKU automatico.
 - `Estampas`: cadastro e edicao de estampas com SKU automatico.
+- `Fornecedor`: cadastro e edicao de fornecedores.
 - `Vinculos`: vincula tecidos a cores ou estampas.
 
 Regra de vinculos:
@@ -119,7 +121,7 @@ Arquivos em Google Drive/Drives compartilhados podem estar apenas parcialmente s
 2. `Atacado`
 3. `Varejo`
 
-O cadastro de tecido nao deve editar custo base diretamente. O custo base geral fica em `Lista de Precos > Custo Base`; precos de venda ficam em `Atacado` e `Varejo`.
+O cadastro de tecido permite escolher fornecedor, usado pelo resumo de fornecedor em Estoque. O custo base geral fica em `Lista de Precos > Custo Base`; precos de venda ficam em `Atacado` e `Varejo`.
 
 Cada lista permite:
 
@@ -140,7 +142,7 @@ O fluxo de nova venda e:
    - cores para tecido `Liso`
    - estampas para tecido `Estampado`
 3. Selecionar o vinculo.
-4. Informar preco unitario e quantidade.
+4. Escolher preco unitario (`Atacado`, `Varejo` ou `Manual`) e informar quantidade.
 5. Conferir o resumo do pedido.
 6. Finalizar, ou finalizar e imprimir recibo direto na impressora configurada.
 
@@ -148,17 +150,42 @@ O `Resumo do pedido` aparece apenas na tela de lancamento, inclusive quando uma 
 
 No `Historico de Vendas`, o periodo padrao e o dia atual. Ajuste `Data inicio` e `Data fim` no formato `AAAA-MM-DD` e pressione `Enter` para recarregar. Na lista, `Enter` abre a venda selecionada para edicao. A tela de edicao permite salvar alteracoes, salvar e imprimir, cancelar ou excluir com confirmacao.
 
+Toda venda finalizada grava uma saida de estoque por vinculo (`tecido + cor/estampa`). Ao editar ou excluir uma venda, as movimentacoes de estoque e ordens automaticas daquela venda sao recalculadas. O saldo pode ficar negativo.
+
 ## Pedidos
 
 Pedidos usam o mesmo fluxo de lancamento de vendas, mas geram uma pendencia em vez de uma venda imediata:
 
 1. Selecionar tecido e vinculo.
-2. Informar preco unitario e quantidade.
+2. Escolher preco unitario (`Atacado`, `Varejo` ou `Manual`) e informar quantidade.
 3. Gerar pedido.
-4. O sistema salva o pedido como `pendente`, gera um PDF em `pdf_pedidos/` e abre o compartilhamento nativo do Windows com o PDF anexado.
+4. O sistema salva o pedido como `pendente`, gera um PDF em `Documents\Razai\pedidos` em segundo plano e tenta abrir o compartilhamento nativo do Windows com o PDF anexado quando solicitado.
 5. Depois do pagamento, abra o pedido no historico e aprove para converter em venda.
 
-Se a geracao do PDF falhar internamente, a TUI deve continuar aberta e exibir erro no status. A decisao de arquitetura e mover a geracao/compartilhamento de PDF de pedido para worker em segundo plano, seguindo o mesmo padrao ja usado por upload de imagens, checklist e operacoes Shopee.
+Enquanto o PDF e gerado, a TUI continua responsiva e mostra um indicador de progresso. Se a geracao do PDF falhar internamente, a TUI continua aberta e exibe erro no status. Esse fluxo usa o mesmo slot `BackgroundTask` aplicado a upload de imagens, checklist e operacoes Shopee. O arquivo fica fora do workspace para nao reiniciar o app quando ele estiver rodando com `cargo watch`. O PDF e montado a partir dos itens salvos no banco; enquanto ele estiver em andamento, o mesmo pedido nao pode ser alterado ou aprovado.
+
+Ao abrir um pedido pelo historico, `[Cancelar Pedido]` pede confirmacao e remove o pedido da listagem. O PDF ja gerado permanece na pasta de documentos.
+
+O compartilhamento usa a Windows Share UI via WinRT (`DataTransferManager`). O status so informa que o compartilhamento abriu quando o Windows solicita os dados do PDF. Se o painel nativo nao abrir, o app seleciona o PDF no Explorer, mostra o caminho no status e registra detalhes em `%TEMP%\razai_pdf_*.log`.
+
+No resumo do pedido, use `Tab` para focar os lancamentos, `Cima/Baixo` para selecionar, `Enter` para editar preco/quantidade e `Delete` para remover. Pedido pendente nao altera estoque; a baixa acontece quando ele e aprovado e convertido em venda. Se a aprovacao vender acima do saldo disponivel, o app cria uma ordem de estoque para a quantidade faltante.
+
+## Estoque
+
+A aba `Estoque` abre com:
+
+1. `Ver todo o estoque`
+2. `Ver ordens de estoque`
+3. `Ver resumo fornecedor`
+4. `Ver mais vendidos`
+
+`Ver todo o estoque` mostra saldo por vinculo, agrupado por tecido. Ao abrir um vinculo, o operador pode registrar `Entrada` ou `Transferencia`. Entradas aumentam saldo; transferencias reduzem saldo sem calculo financeiro. O saldo e calculado por movimentacoes e aceita valores negativos.
+
+`Ver ordens de estoque` lista pendencias automaticas criadas quando uma venda, ou pedido aprovado como venda, baixa mais do que o saldo disponivel. A ordem nasce `pendente`, nao altera saldo e pode ser direcionada a um fornecedor, concluida ou cancelada.
+
+`Ver resumo fornecedor` permite escolher fornecedor cadastrado e filtrar por periodo no topo (`AAAA-MM-DD`). O relatorio mostra tecidos vendidos daquele fornecedor, quantidade vendida e custo total vendido, usando custo especifico do vinculo quando existir ou custo base do tecido.
+
+`Ver mais vendidos` mostra um ranking geral por vinculo vendido (`tecido + cor/estampa + SKU`) com barras proporcionais em caracteres para comparar quantidades.
 
 ## Documentos
 
@@ -168,7 +195,7 @@ A aba `Documentos` fica antes de `Configuracoes` e possui:
 
 O checklist permite marcar um ou mais tecidos com `Space` e gerar o PDF com `Ctrl+Enter` ou pela opcao `[Gerar PDF]`. O arquivo e salvo fora do workspace, em `Documents\Razai\checklists`, para nao reiniciar o app quando ele estiver rodando com `cargo watch`.
 
-Depois de gerar, o sistema chama a acao de impressao do Windows para o PDF. Se o visualizador padrao nao oferecer impressao direta, o sistema tenta abrir o PDF como fallback.
+Depois de gerar, o sistema chama a acao de impressao do Windows para o PDF a partir do loop principal da TUI. Se o visualizador padrao nao oferecer impressao direta, o sistema tenta abrir o PDF como fallback e diferencia esse caso no status.
 
 O PDF separa uma tabela para cada tecido selecionado. Cada linha mostra:
 

@@ -181,7 +181,8 @@ impl App {
                     self.vendas_screen = VendasScreen::Lancamento;
                     self.venda_field = VendaField::Preco;
                     self.venda_dropdown = None;
-                    self.venda_preco.clear();
+                    self.venda_preco_option = 0;
+                    self.apply_venda_preco_option();
                     self.venda_quantidade.clear();
                 }
             }
@@ -190,7 +191,10 @@ impl App {
                     self.editar_venda_item_selecionado();
                     return;
                 }
-                if matches!(self.venda_field, VendaField::Tecido | VendaField::Vinculo) {
+                if matches!(
+                    self.venda_field,
+                    VendaField::Tecido | VendaField::Vinculo | VendaField::Preco
+                ) {
                     self.venda_dropdown = Some(self.venda_field);
                     return;
                 }
@@ -269,8 +273,10 @@ impl App {
                     self.venda_vinculo_option =
                         (self.venda_vinculo_option + 1) % self.venda_vinculos.len();
                     self.editing_venda_item_descricao = None;
+                    self.apply_venda_preco_option();
                 }
             }
+            Some(VendaField::Preco) => self.next_venda_preco_option(),
             _ => {}
         }
     }
@@ -291,8 +297,10 @@ impl App {
                         (self.venda_vinculo_option + self.venda_vinculos.len() - 1)
                             % self.venda_vinculos.len();
                     self.editing_venda_item_descricao = None;
+                    self.apply_venda_preco_option();
                 }
             }
+            Some(VendaField::Preco) => self.previous_venda_preco_option(),
             _ => {}
         }
     }
@@ -314,6 +322,16 @@ impl App {
             descricao,
             quantidade,
             preco_unitario: preco,
+            estoque_tecido_id: self
+                .tecidos
+                .get(self.venda_tecido_option)
+                .map(|tecido| tecido.id),
+            estoque_item_id: Some(vinculo.cor_id),
+            estoque_usa_estampas: self
+                .tecidos
+                .get(self.venda_tecido_option)
+                .map(|tecido| tecido.tipo == "Estampado")
+                .unwrap_or(false),
         };
         if let Some(index) = self.editing_venda_item {
             if let Some(current) = self.venda_itens.get_mut(index) {
@@ -327,6 +345,8 @@ impl App {
             self.db_status = String::from("Lancamento adicionado ao resumo");
         }
         self.venda_dropdown = None;
+        self.venda_preco_option = 0;
+        self.apply_venda_preco_option();
         self.venda_quantidade.clear();
         self.editing_venda_item = None;
         self.editing_venda_item_descricao = None;
@@ -358,6 +378,8 @@ impl App {
                 return;
             }
             self.reload_vendas_historico();
+            self.reload_estoque_saldos();
+            self.reload_estoque_ordens();
         }
 
         self.db_status = if self.editing_venda_id.is_some() {
@@ -377,6 +399,7 @@ impl App {
         self.finalizar_venda_dialog = false;
         self.vendas_screen = VendasScreen::Menu;
         self.venda_dropdown = None;
+        self.venda_preco_option = 0;
         self.venda_preco.clear();
         self.venda_quantidade.clear();
         self.venda_itens.clear();
@@ -391,6 +414,7 @@ impl App {
         self.venda_vinculos.clear();
         self.finalizar_venda_dialog = false;
         self.venda_dropdown = None;
+        self.venda_preco_option = 0;
         self.venda_preco.clear();
         self.venda_quantidade.clear();
         self.venda_tecido_option = 0;
@@ -415,6 +439,8 @@ impl App {
         match self.db_runtime.block_on(db::delete_venda(pool, venda_id)) {
             Ok(()) => {
                 self.reload_vendas_historico();
+                self.reload_estoque_saldos();
+                self.reload_estoque_ordens();
                 self.venda_historico_option = self
                     .venda_historico_option
                     .min(self.vendas_historico.len().saturating_sub(1));
@@ -443,7 +469,13 @@ impl App {
         }
         match self.venda_field {
             VendaField::Tecido | VendaField::Vinculo => {}
-            VendaField::Preco => self.venda_preco.push(character),
+            VendaField::Preco => {
+                if self.venda_preco_option != 2 {
+                    self.venda_preco_option = 2;
+                    self.venda_preco.clear();
+                }
+                self.venda_preco.push(character);
+            }
             VendaField::Quantidade => self.venda_quantidade.push(character),
             VendaField::Finalizar | VendaField::Cancelar | VendaField::Excluir => {}
         }
@@ -460,7 +492,12 @@ impl App {
         match self.venda_field {
             VendaField::Tecido | VendaField::Vinculo => {}
             VendaField::Preco => {
-                self.venda_preco.pop();
+                if self.venda_preco_option != 2 {
+                    self.venda_preco_option = 2;
+                    self.venda_preco.clear();
+                } else {
+                    self.venda_preco.pop();
+                }
             }
             VendaField::Quantidade => {
                 self.venda_quantidade.pop();
@@ -494,6 +531,7 @@ impl App {
         };
         self.editing_venda_item = Some(self.venda_item_option);
         self.editing_venda_item_descricao = Some(item.descricao.clone());
+        self.venda_preco_option = 2;
         self.venda_preco = format_number_input(item.preco_unitario);
         self.venda_quantidade = format_number_input(item.quantidade);
         self.venda_field = VendaField::Preco;
@@ -530,6 +568,8 @@ impl App {
                     return;
                 }
                 self.reload_vendas_historico();
+                self.reload_estoque_saldos();
+                self.reload_estoque_ordens();
             }
 
             self.venda_item_option = self
@@ -553,6 +593,7 @@ impl App {
         self.venda_item_option = 0;
         self.editing_venda_item = None;
         self.editing_venda_item_descricao = None;
+        self.venda_preco_option = 0;
         self.pending_delete_venda_item = false;
     }
 
@@ -570,6 +611,7 @@ impl App {
         if self.vendas_screen == VendasScreen::Lancamento && self.editing_venda_item.is_some() {
             self.editing_venda_item = None;
             self.editing_venda_item_descricao = None;
+            self.venda_preco_option = 0;
             self.venda_preco.clear();
             self.venda_quantidade.clear();
             self.db_status = String::from("Edicao do lancamento cancelada");
@@ -600,6 +642,45 @@ impl App {
             self.editing_venda_id = None;
             self.reset_venda_item_editing();
         }
+    }
+}
+
+impl App {
+    fn next_venda_preco_option(&mut self) {
+        self.set_venda_preco_option((self.venda_preco_option + 1) % 3);
+    }
+
+    fn previous_venda_preco_option(&mut self) {
+        self.set_venda_preco_option((self.venda_preco_option + 2) % 3);
+    }
+
+    fn set_venda_preco_option(&mut self, option: usize) {
+        self.venda_preco_option = option;
+        if self.venda_preco_option == 2 {
+            self.venda_preco.clear();
+            return;
+        }
+        self.apply_venda_preco_option();
+    }
+
+    fn apply_venda_preco_option(&mut self) {
+        if self.venda_preco_option == 2 {
+            return;
+        }
+        self.venda_preco = self
+            .venda_vinculos
+            .get(self.venda_vinculo_option)
+            .and_then(|vinculo| preco_option_value(vinculo, self.venda_preco_option))
+            .map(format_number_input)
+            .unwrap_or_default();
+    }
+}
+
+pub(crate) fn preco_option_value(vinculo: &db::VinculoRecord, option: usize) -> Option<f64> {
+    match option {
+        0 => vinculo.preco_atacado_efetivo,
+        1 => vinculo.preco_varejo_efetivo,
+        _ => None,
     }
 }
 

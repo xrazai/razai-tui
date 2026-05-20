@@ -11,11 +11,11 @@ use ratatui_image::Image as TuiImage;
 
 use crate::{
     app::App,
-    db::{CorRecord, EstampaRecord, TecidoRecord, VinculoRecord},
+    db::{CorRecord, EstampaRecord, FornecedorRecord, TecidoRecord, VinculoRecord},
     models::*,
     ui::{
-        centered_rect, color_swatch, list_state_with_action_separators, list_state_with_lookahead,
-        render_dialog_background,
+        color_swatch, list_state_with_action_separators, list_state_with_lookahead,
+        render_destructive_confirm_dialog, table_cell, table_cell_right,
     },
 };
 
@@ -31,6 +31,8 @@ pub fn render(frame: &mut Frame, area: Rect, app: &App) {
             app.editing_tecido_id,
             app.pending_delete,
             app.tecido_select_dropdown,
+            &app.fornecedores,
+            app.tecido_fornecedor_option,
         ),
         DadosScreen::Cores => render_cores(
             frame,
@@ -55,6 +57,16 @@ pub fn render(frame: &mut Frame, area: Rect, app: &App) {
             &app.estampa_form,
             &app.estampas,
             app.editing_estampa_id,
+            app.pending_delete,
+        ),
+        DadosScreen::Fornecedores => {
+            render_fornecedores(frame, area, app.cor_option, &app.fornecedores)
+        }
+        DadosScreen::CadastrarFornecedor => forms::render_cadastrar_fornecedor(
+            frame,
+            area,
+            &app.fornecedor_form,
+            app.editing_fornecedor_id,
             app.pending_delete,
         ),
         DadosScreen::VinculosMenu => render_vinculos_menu(frame, area, app.vinculo_menu_option),
@@ -130,12 +142,17 @@ fn render_menu(frame: &mut Frame, area: Rect, selected: DadosOption) {
 fn render_tecidos(frame: &mut Frame, area: Rect, selected: usize, tecidos: &[TecidoRecord]) {
     let items = std::iter::once(String::from("1. [Cadastrar tecido]"))
         .chain(std::iter::once(String::new()))
-        .chain(
-            tecidos
-                .iter()
-                .enumerate()
-                .map(|(index, tecido)| format!("{}. {}", index + 2, tecido.nome)),
-        )
+        .chain(tecidos.iter().enumerate().map(|(index, tecido)| {
+            format!(
+                "{}. {} | fornecedor: {}",
+                index + 2,
+                tecido.nome,
+                tecido
+                    .fornecedor_nome
+                    .as_deref()
+                    .unwrap_or("sem fornecedor")
+            )
+        }))
         .enumerate()
         .map(|(_, tecido)| ListItem::new(tecido));
     let item_count = tecidos.len() + 1;
@@ -144,6 +161,52 @@ fn render_tecidos(frame: &mut Frame, area: Rect, selected: usize, tecidos: &[Tec
         .block(
             Block::default()
                 .title("Dados > Tecido")
+                .borders(Borders::ALL),
+        )
+        .highlight_symbol("> ")
+        .highlight_style(
+            Style::default()
+                .fg(Color::Black)
+                .bg(Color::Cyan)
+                .add_modifier(Modifier::BOLD),
+        );
+
+    frame.render_stateful_widget(list, area, &mut state);
+}
+
+fn render_fornecedores(
+    frame: &mut Frame,
+    area: Rect,
+    selected: usize,
+    fornecedores: &[FornecedorRecord],
+) {
+    let mut items = vec![
+        ListItem::new("1. [Cadastrar fornecedor]"),
+        ListItem::new(""),
+        ListItem::new(Line::from(format!(
+            "   {} {} {} {}",
+            table_cell("Nome", 22),
+            table_cell("Empresa", 22),
+            table_cell("Telefone", 16),
+            table_cell("Endereco", 28)
+        ))),
+    ];
+    items.extend(fornecedores.iter().enumerate().map(|(index, fornecedor)| {
+        ListItem::new(Line::from(format!(
+            "{}. {} {} {} {}",
+            index + 2,
+            table_cell(&fornecedor.nome, 22),
+            table_cell(&fornecedor.empresa, 22),
+            table_cell(&fornecedor.telefone, 16),
+            table_cell(&fornecedor.endereco, 28)
+        )))
+    }));
+    let visual_selected = if selected == 0 { 0 } else { selected + 2 };
+    let mut state = list_state_with_lookahead(Some(visual_selected), items.len(), area);
+    let list = List::new(items)
+        .block(
+            Block::default()
+                .title("Dados > Fornecedor")
                 .borders(Borders::ALL),
         )
         .highlight_symbol("> ")
@@ -183,45 +246,58 @@ fn render_lista_precos(frame: &mut Frame, area: Rect, app: &App) {
     let items = if app.tecidos.is_empty() {
         vec![ListItem::new("Nenhum tecido cadastrado.")]
     } else {
-        app.tecidos
-            .iter()
-            .enumerate()
-            .map(|tecido| {
-                let (index, tecido) = tecido;
-                let price = tecido_lista_preco(tecido, app.lista_precos_tipo);
-                let overrides = tecido_lista_override_count(tecido, app.lista_precos_tipo);
-                let override_summary = tecido_lista_override_summary(tecido, app.lista_precos_tipo);
-                ListItem::new(Line::from(vec![
-                    Span::raw(format!("{}. ", index + 1)),
-                    Span::styled(
-                        format!("{:<4}", tecido.sku),
-                        Style::default().fg(Color::Yellow),
-                    ),
-                    Span::raw(format!(
-                        " {} | referencia R$ {} | {} R$ ",
-                        tecido.nome,
-                        format_optional_money(tecido.custo_base),
-                        app.lista_precos_tipo.value_label().to_lowercase()
-                    )),
-                    Span::styled(
-                        format_optional_money(price),
-                        Style::default().fg(Color::Cyan),
-                    ),
-                    Span::raw(" | "),
-                    Span::styled(
-                        override_summary,
-                        if overrides > 0 {
-                            Style::default().fg(Color::Yellow)
-                        } else {
-                            Style::default().fg(Color::DarkGray)
-                        },
-                    ),
-                ]))
-            })
-            .collect()
+        let mut items = vec![ListItem::new(Line::from(vec![
+            Span::raw(format!("{} ", table_cell_right("#", 3))),
+            Span::raw(format!("{} ", table_cell("SKU", 5))),
+            Span::raw(format!("{} ", table_cell("Tecido", 24))),
+            Span::raw(format!(
+                "{} ",
+                table_cell_right(lista_preco_referencia_label(app.lista_precos_tipo), 13)
+            )),
+            Span::raw(format!(
+                "{} ",
+                table_cell_right(app.lista_precos_tipo.value_label(), 14)
+            )),
+            Span::raw("Excecoes"),
+        ]))];
+        items.extend(app.tecidos.iter().enumerate().map(|tecido| {
+            let (index, tecido) = tecido;
+            let price = tecido_lista_preco(tecido, app.lista_precos_tipo);
+            let reference = tecido_lista_referencia(tecido, app.lista_precos_tipo);
+            let overrides = tecido_lista_override_count(tecido, app.lista_precos_tipo);
+            let override_summary = tecido_lista_override_summary(tecido, app.lista_precos_tipo);
+            ListItem::new(Line::from(vec![
+                Span::raw(format!(
+                    "{} ",
+                    table_cell_right(&(index + 1).to_string(), 3)
+                )),
+                Span::styled(
+                    format!("{} ", table_cell(&tecido.sku, 5)),
+                    Style::default().fg(Color::Yellow),
+                ),
+                Span::raw(format!("{} ", table_cell(&tecido.nome, 24))),
+                Span::raw(format!(
+                    "{} ",
+                    table_cell_right(&format_optional_money(reference), 13)
+                )),
+                Span::styled(
+                    format!("{} ", table_cell_right(&format_optional_money(price), 14)),
+                    Style::default().fg(Color::Cyan),
+                ),
+                Span::styled(
+                    override_summary,
+                    if overrides > 0 {
+                        Style::default().fg(Color::Yellow)
+                    } else {
+                        Style::default().fg(Color::DarkGray)
+                    },
+                ),
+            ]))
+        }));
+        items
     };
-    let mut state =
-        list_state_with_lookahead(Some(app.lista_precos_tecido_option), items.len(), area);
+    let selected = (!app.tecidos.is_empty()).then_some(app.lista_precos_tecido_option + 1);
+    let mut state = list_state_with_lookahead(selected, items.len(), area);
     let list = List::new(items)
         .block(
             Block::default()
@@ -317,37 +393,67 @@ fn render_lista_precos_vinculos(frame: &mut Frame, area: Rect, app: &App) {
     let items = if app.vinculos.is_empty() {
         vec![ListItem::new("Nenhum vinculo cadastrado para este tecido.")]
     } else {
-        app.vinculos
-            .iter()
-            .enumerate()
-            .map(|(index, vinculo)| {
-                let effective = vinculo_lista_preco_efetivo(vinculo, app.lista_precos_tipo);
-                let base = vinculo_lista_preco_base(vinculo, app.lista_precos_tipo);
-                let override_price = vinculo_lista_preco_override(vinculo, app.lista_precos_tipo);
-                let value = if app.editing_lista_preco_vinculo
-                    && index == app.lista_precos_vinculo_option
-                {
-                    if app.lista_precos_vinculo_input.is_empty() {
-                        String::from("_")
+        let mut items = vec![ListItem::new(Line::from(format!(
+            "{} {} {} {} {}",
+            table_cell_right("#", 4),
+            table_cell("Cor", 20),
+            table_cell_right("Efetivo", 12),
+            table_cell_right("Base", 12),
+            table_cell("Origem", 12)
+        )))];
+        items.extend(app.vinculos.iter().enumerate().map(|(index, vinculo)| {
+            let effective = vinculo_lista_preco_efetivo(vinculo, app.lista_precos_tipo);
+            let base = vinculo_lista_preco_base(vinculo, app.lista_precos_tipo);
+            let override_price = vinculo_lista_preco_override(vinculo, app.lista_precos_tipo);
+            let editing =
+                app.editing_lista_preco_vinculo && index == app.lista_precos_vinculo_option;
+            let value = if editing {
+                if app.lista_precos_vinculo_input.is_empty() {
+                    String::from("_")
+                } else {
+                    app.lista_precos_vinculo_input.clone()
+                }
+            } else {
+                format_optional_money(effective)
+            };
+            let source = if editing {
+                "editando"
+            } else if override_price.is_some() {
+                "especifico"
+            } else {
+                "base"
+            };
+            ListItem::new(Line::from(vec![
+                Span::raw(format!(
+                    "{} ",
+                    table_cell_right(&(index + 1).to_string(), 4)
+                )),
+                Span::raw(format!("{} ", table_cell(&vinculo.cor_nome, 20))),
+                Span::styled(
+                    format!("{} ", table_cell_right(&value, 12)),
+                    Style::default().fg(Color::Cyan),
+                ),
+                Span::raw(format!(
+                    "{} ",
+                    table_cell_right(&format_optional_money(base), 12)
+                )),
+                Span::styled(
+                    table_cell(source, 12),
+                    if override_price.is_some() {
+                        Style::default().fg(Color::Yellow)
                     } else {
-                        app.lista_precos_vinculo_input.clone()
-                    }
-                } else {
-                    format_optional_money(effective)
-                };
-                let details = if app.editing_lista_preco_vinculo
-                    && index == app.lista_precos_vinculo_option
-                {
-                    format!("editando R$ {value}")
-                } else {
-                    format_vinculo_lista_valor(effective, base, override_price)
-                };
-                ListItem::new(format!("{}. {} | {}", index + 1, vinculo.cor_nome, details))
-            })
-            .collect()
+                        Style::default().fg(Color::DarkGray)
+                    },
+                ),
+            ]))
+        }));
+        items
     };
-    let mut state =
-        list_state_with_lookahead(Some(app.lista_precos_vinculo_option), items.len(), area);
+    let mut state = list_state_with_lookahead(
+        (!app.vinculos.is_empty()).then_some(app.lista_precos_vinculo_option + 1),
+        items.len(),
+        area,
+    );
     let list = List::new(items)
         .block(
             Block::default()
@@ -539,24 +645,41 @@ fn render_vinculos_lista(
     selected: usize,
     vinculos: &[VinculoRecord],
 ) {
-    let items = vinculos.iter().enumerate().map(|(index, vinculo)| {
-        let sku = vinculo.sku.as_deref().unwrap_or("sem-sku");
-        let hex = vinculo.cor_hex.as_deref().unwrap_or("#");
-        let image_count = App::vinculo_record_image_count(vinculo);
-        ListItem::new(Line::from(vec![
-            Span::raw(format!(
-                "{}. [{}/4] {} - {} / ",
-                index + 1,
-                image_count,
-                sku,
-                vinculo.tecido_nome
-            )),
-            color_swatch(hex),
-            Span::raw(format!(" {}", vinculo.cor_nome)),
-        ]))
-    });
+    let items = if vinculos.is_empty() {
+        vec![ListItem::new("Nenhum vinculo cadastrado.")]
+    } else {
+        let mut items = vec![ListItem::new(Line::from(format!(
+            "{} {} {} {} {}",
+            table_cell_right("#", 4),
+            table_cell("Img", 5),
+            table_cell("SKU", 12),
+            table_cell("Tecido", 24),
+            table_cell("Cor", 18)
+        )))];
+        items.extend(vinculos.iter().enumerate().map(|(index, vinculo)| {
+            let sku = vinculo.sku.as_deref().unwrap_or("sem-sku");
+            let hex = vinculo.cor_hex.as_deref().unwrap_or("#");
+            let image_count = App::vinculo_record_image_count(vinculo);
+            ListItem::new(Line::from(vec![
+                Span::raw(format!(
+                    "{} ",
+                    table_cell_right(&(index + 1).to_string(), 4)
+                )),
+                Span::raw(format!("{} ", table_cell(&format!("{image_count}/4"), 5))),
+                Span::raw(format!("{} ", table_cell(sku, 12))),
+                Span::raw(format!("{} ", table_cell(&vinculo.tecido_nome, 24))),
+                color_swatch(hex),
+                Span::raw(format!(" {}", table_cell(&vinculo.cor_nome, 15))),
+            ]))
+        }));
+        items
+    };
     let selected = selected.min(vinculos.len().saturating_sub(1));
-    let mut state = list_state_with_lookahead(Some(selected), vinculos.len(), area);
+    let mut state = list_state_with_lookahead(
+        (!vinculos.is_empty()).then_some(selected + 1),
+        items.len(),
+        area,
+    );
     let list = List::new(items)
         .block(
             Block::default()
@@ -604,7 +727,10 @@ fn render_vinculo_detalhe(frame: &mut Frame, area: Rect, app: &App) {
                 "[Custo vinculo] R$ {value} ({source}; base R$ {base})"
             ))
         }
-        VinculoDetalheOption::Desfazer => ListItem::new("[Desfazer Vinculo]"),
+        VinculoDetalheOption::Desfazer => ListItem::new(Line::from(Span::styled(
+            "[Desfazer Vinculo]",
+            Style::default().fg(Color::Red),
+        ))),
     });
     let current_count = app.vinculo_current_image_count();
     let mut state = list_state_with_lookahead(
@@ -640,7 +766,7 @@ fn render_vinculo_detalhe(frame: &mut Frame, area: Rect, app: &App) {
         horizontal: 1,
         vertical: 1,
     });
-    if let Some(started_at) = app.vinculo_image_upload_started {
+    if let Some(started_at) = app.vinculo_image_upload_started() {
         let spinner = ["|", "/", "-", "\\"][(started_at.elapsed().as_millis() as usize / 250) % 4];
         frame.render_widget(
             Paragraph::new(format!(
@@ -676,15 +802,15 @@ fn render_vinculo_detalhe(frame: &mut Frame, area: Rect, app: &App) {
     );
 
     if app.pending_unlink_vinculo {
-        let dialog_area = centered_rect(56, 7, area);
-        render_dialog_background(frame, dialog_area);
-        let dialog = Paragraph::new(format!(
-            "Desfazer vinculo de {} / {}?\n\nEle deixara de aparecer para novos lancamentos. Historico e imagens permanecem no banco.\nS/Enter confirma   N/Esc cancela",
-            vinculo.tecido_nome, vinculo.cor_nome
-        ))
-        .block(Block::default().title("Confirmar").borders(Borders::ALL))
-        .style(Style::default().fg(Color::Yellow));
-        frame.render_widget(dialog, dialog_area);
+        render_destructive_confirm_dialog(
+            frame,
+            area,
+            "Desfazer vinculo",
+            &format!(
+                "Desfazer vinculo de {} / {}?\nEle deixara de aparecer para novos lancamentos. Historico e imagens permanecem no banco.",
+                vinculo.tecido_nome, vinculo.cor_nome
+            ),
+        );
     }
 }
 
@@ -699,6 +825,22 @@ fn tecido_lista_preco(tecido: &TecidoRecord, tipo: ListaPrecoTipo) -> Option<f64
         ListaPrecoTipo::Custo => tecido.custo_base,
         ListaPrecoTipo::Atacado => tecido.preco_atacado,
         ListaPrecoTipo::Varejo => tecido.preco_varejo,
+    }
+}
+
+fn lista_preco_referencia_label(tipo: ListaPrecoTipo) -> &'static str {
+    match tipo {
+        ListaPrecoTipo::Custo => "Referencia",
+        ListaPrecoTipo::Atacado => "Varejo",
+        ListaPrecoTipo::Varejo => "Atacado",
+    }
+}
+
+fn tecido_lista_referencia(tecido: &TecidoRecord, tipo: ListaPrecoTipo) -> Option<f64> {
+    match tipo {
+        ListaPrecoTipo::Custo => tecido.custo_base,
+        ListaPrecoTipo::Atacado => tecido.preco_varejo,
+        ListaPrecoTipo::Varejo => tecido.preco_atacado,
     }
 }
 
@@ -765,25 +907,5 @@ fn vinculo_lista_preco_efetivo(vinculo: &VinculoRecord, tipo: ListaPrecoTipo) ->
         ListaPrecoTipo::Custo => vinculo.custo_efetivo,
         ListaPrecoTipo::Atacado => vinculo.preco_atacado_efetivo,
         ListaPrecoTipo::Varejo => vinculo.preco_varejo_efetivo,
-    }
-}
-
-fn format_vinculo_lista_valor(
-    effective: Option<f64>,
-    base: Option<f64>,
-    override_value: Option<f64>,
-) -> String {
-    match (effective, base, override_value) {
-        (Some(value), Some(base), Some(_)) => format!(
-            "especifico R$ {} | base R$ {}",
-            format_optional_money(Some(value)),
-            format_optional_money(Some(base))
-        ),
-        (Some(value), None, Some(_)) => format!(
-            "especifico R$ {} | base nao definida",
-            format_optional_money(Some(value))
-        ),
-        (Some(value), _, None) => format!("base R$ {}", format_optional_money(Some(value))),
-        (None, _, _) => String::from("sem valor"),
     }
 }

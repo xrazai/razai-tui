@@ -38,6 +38,14 @@ pub fn active_context(
             capability: "dados.estampas.cadastro",
             description: "Ajuda no cadastro de estampas e geracao automatica de SKU.",
         },
+        (Section::Dados, DadosScreen::Fornecedores, _, _) => AgentContext {
+            capability: "dados.fornecedores.lista",
+            description: "Ajuda a consultar fornecedores cadastrados e iniciar novos cadastros.",
+        },
+        (Section::Dados, DadosScreen::CadastrarFornecedor, _, _) => AgentContext {
+            capability: "dados.fornecedores.cadastro",
+            description: "Ajuda no cadastro de fornecedores: nome, empresa, telefone e endereco.",
+        },
         (Section::Dados, DadosScreen::VinculosMenu, _, _) => AgentContext {
             capability: "dados.vinculos.menu",
             description: "Ajuda a escolher entre criar vinculos e consultar vinculos existentes.",
@@ -97,6 +105,10 @@ pub fn active_context(
         (Section::Dados, DadosScreen::Menu, DadosOption::Estampas, _) => AgentContext {
             capability: "dados.estampas",
             description: "Ajuda com cadastro e consulta de estampas.",
+        },
+        (Section::Dados, DadosScreen::Menu, DadosOption::Fornecedor, _) => AgentContext {
+            capability: "dados.fornecedores",
+            description: "Ajuda com cadastro e consulta de fornecedores.",
         },
         (Section::Dados, DadosScreen::Menu, DadosOption::Vinculos, _) => AgentContext {
             capability: "dados.vinculos",

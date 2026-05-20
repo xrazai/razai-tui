@@ -58,7 +58,16 @@ fn checklist_pdf_bytes(sections: &[ChecklistSection]) -> Result<Vec<u8>, String>
     let mut y = PAGE_TOP;
 
     draw_header(&mut canvas, page_number);
-    for section in sections {
+    for (section_index, section) in sections.iter().enumerate() {
+        if section_index > 0 {
+            draw_footer(&mut canvas, page_number);
+            pages.push(PdfPage::new(Mm(210.0), Mm(297.0), canvas.into_ops()));
+            page_number += 1;
+            canvas = PdfCanvas::new(fonts.clone());
+            draw_header(&mut canvas, page_number);
+            y = PAGE_TOP;
+        }
+
         if y - MIN_SECTION_HEIGHT < PAGE_BOTTOM {
             draw_footer(&mut canvas, page_number);
             pages.push(PdfPage::new(Mm(210.0), Mm(297.0), canvas.into_ops()));
@@ -468,6 +477,8 @@ mod tests {
             rendimento_m_kg: None,
             gramatura_linear_g_m: Some(120),
             gramatura_g_m2: None,
+            fornecedor_id: None,
+            fornecedor_nome: None,
         };
         let vinculos = (0..30)
             .map(|index| VinculoRecord {
@@ -524,6 +535,8 @@ mod tests {
             rendimento_m_kg: None,
             gramatura_linear_g_m: Some(120),
             gramatura_g_m2: None,
+            fornecedor_id: None,
+            fornecedor_nome: None,
         };
         let vinculos = (0..250)
             .map(|index| VinculoRecord {

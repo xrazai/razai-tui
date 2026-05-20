@@ -296,7 +296,7 @@ impl App {
         if let Some(pool) = &self.db_pool
             && let Err(error) = self
                 .db_runtime
-                .block_on(db::insert_tecido(pool, &form, &sku))
+                .block_on(db::insert_tecido(pool, &form, &sku, None))
         {
             return format!("Erro ao cadastrar tecido: {error}");
         }
@@ -1005,6 +1005,9 @@ fn build_venda_item(tecido: &str, item: &str, preco: &str, quantidade: &str) -> 
         descricao: format!("{tecido} - {item}"),
         quantidade,
         preco_unitario,
+        estoque_tecido_id: None,
+        estoque_item_id: None,
+        estoque_usa_estampas: false,
     })
 }
 
@@ -1386,11 +1389,17 @@ mod tests {
             .block_on(db::ensure_configuracoes_table(&pool))
             .expect("configuracoes");
         runtime
+            .block_on(db::ensure_fornecedores_table(&pool))
+            .expect("fornecedores");
+        runtime
             .block_on(db::ensure_estampas_tables(&pool))
             .expect("estampas");
         runtime
             .block_on(db::ensure_vendas_tables(&pool))
             .expect("vendas");
+        runtime
+            .block_on(db::ensure_estoque_tables(&pool))
+            .expect("estoque");
         runtime
             .block_on(db::ensure_pedidos_tables(&pool))
             .expect("pedidos");
@@ -1416,6 +1425,7 @@ mod tests {
             tecidos,
             cores,
             estampas,
+            Vec::new(),
             None,
             3.0,
             vendas,

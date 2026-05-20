@@ -27,6 +27,7 @@ impl App {
     pub(in crate::app) fn cor_menu_len(&self) -> usize {
         match self.dados_screen {
             DadosScreen::Estampas => self.estampas.len() + 1,
+            DadosScreen::Fornecedores => self.fornecedores.len() + 1,
             _ => self.cores.len() + 1,
         }
     }

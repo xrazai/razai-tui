@@ -2,8 +2,10 @@ use sqlx::{PgPool, Row, postgres::PgPoolOptions};
 
 mod orders;
 mod sales;
+mod stock;
 pub use orders::*;
 pub use sales::*;
+pub use stock::*;
 
 use crate::models::{
     ACABAMENTO_OPTIONS, ListaPrecoTipo, NIVEL_OPTIONS, TIPO_OPTIONS, TecidoForm, parse_largura_m,
@@ -46,6 +48,25 @@ pub async fn ensure_configuracoes_table(pool: &PgPool) -> Result<(), sqlx::Error
     Ok(())
 }
 
+pub async fn ensure_fornecedores_table(pool: &PgPool) -> Result<(), sqlx::Error> {
+    sqlx::query(
+        r#"
+        CREATE TABLE IF NOT EXISTS fornecedores (
+            id BIGSERIAL PRIMARY KEY,
+            nome TEXT NOT NULL,
+            empresa TEXT NOT NULL DEFAULT '',
+            telefone TEXT NOT NULL DEFAULT '',
+            endereco TEXT NOT NULL DEFAULT '',
+            created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+        )
+        "#,
+    )
+    .execute(pool)
+    .await?;
+
+    Ok(())
+}
+
 pub async fn ensure_tecido_custo_base_column(pool: &PgPool) -> Result<(), sqlx::Error> {
     sqlx::query("ALTER TABLE tecidos ADD COLUMN IF NOT EXISTS custo_base NUMERIC(12, 2)")
         .execute(pool)
@@ -56,6 +77,11 @@ pub async fn ensure_tecido_custo_base_column(pool: &PgPool) -> Result<(), sqlx::
     sqlx::query("ALTER TABLE tecidos ADD COLUMN IF NOT EXISTS preco_varejo NUMERIC(12, 2)")
         .execute(pool)
         .await?;
+    sqlx::query(
+        "ALTER TABLE tecidos ADD COLUMN IF NOT EXISTS fornecedor_id BIGINT REFERENCES fornecedores(id) ON DELETE SET NULL",
+    )
+    .execute(pool)
+    .await?;
 
     Ok(())
 }
@@ -134,6 +160,17 @@ pub async fn ensure_vendas_tables(pool: &PgPool) -> Result<(), sqlx::Error> {
     sqlx::query("CREATE INDEX IF NOT EXISTS idx_venda_itens_venda_id ON venda_itens(venda_id)")
         .execute(pool)
         .await?;
+    sqlx::query("ALTER TABLE venda_itens ADD COLUMN IF NOT EXISTS estoque_tecido_id BIGINT")
+        .execute(pool)
+        .await?;
+    sqlx::query("ALTER TABLE venda_itens ADD COLUMN IF NOT EXISTS estoque_item_id BIGINT")
+        .execute(pool)
+        .await?;
+    sqlx::query(
+        "ALTER TABLE venda_itens ADD COLUMN IF NOT EXISTS estoque_usa_estampas BOOLEAN NOT NULL DEFAULT FALSE",
+    )
+    .execute(pool)
+    .await?;
     sqlx::query("CREATE INDEX IF NOT EXISTS idx_vendas_created_at ON vendas(created_at DESC)")
         .execute(pool)
         .await?;
@@ -174,6 +211,17 @@ pub async fn ensure_pedidos_tables(pool: &PgPool) -> Result<(), sqlx::Error> {
     sqlx::query("CREATE INDEX IF NOT EXISTS idx_pedido_itens_pedido_id ON pedido_itens(pedido_id)")
         .execute(pool)
         .await?;
+    sqlx::query("ALTER TABLE pedido_itens ADD COLUMN IF NOT EXISTS estoque_tecido_id BIGINT")
+        .execute(pool)
+        .await?;
+    sqlx::query("ALTER TABLE pedido_itens ADD COLUMN IF NOT EXISTS estoque_item_id BIGINT")
+        .execute(pool)
+        .await?;
+    sqlx::query(
+        "ALTER TABLE pedido_itens ADD COLUMN IF NOT EXISTS estoque_usa_estampas BOOLEAN NOT NULL DEFAULT FALSE",
+    )
+    .execute(pool)
+    .await?;
     sqlx::query("CREATE INDEX IF NOT EXISTS idx_pedidos_created_at ON pedidos(created_at DESC)")
         .execute(pool)
         .await?;
@@ -272,6 +320,8 @@ pub struct TecidoRecord {
     pub transparencia: String,
     pub elasticidade: String,
     pub acabamento: String,
+    pub fornecedor_id: Option<i64>,
+    pub fornecedor_nome: Option<String>,
 }
 
 #[derive(Clone)]
@@ -287,6 +337,15 @@ pub struct EstampaRecord {
     pub id: i64,
     pub nome: String,
     pub sku: Option<String>,
+}
+
+#[derive(Clone)]
+pub struct FornecedorRecord {
+    pub id: i64,
+    pub nome: String,
+    pub empresa: String,
+    pub telefone: String,
+    pub endereco: String,
 }
 
 #[derive(Clone)]
@@ -323,14 +382,14 @@ pub async fn list_tecidos(pool: &PgPool) -> Result<Vec<TecidoRecord>, sqlx::Erro
     let rows = sqlx::query(
         r#"
         SELECT
-            id,
-            nome,
-            sku,
-            composicao,
-            largura_m::float8 AS largura_m,
-            custo_base::float8 AS custo_base,
-            preco_atacado::float8 AS preco_atacado,
-            preco_varejo::float8 AS preco_varejo,
+            tecidos.id,
+            tecidos.nome,
+            tecidos.sku,
+            tecidos.composicao,
+            tecidos.largura_m::float8 AS largura_m,
+            tecidos.custo_base::float8 AS custo_base,
+            tecidos.preco_atacado::float8 AS preco_atacado,
+            tecidos.preco_varejo::float8 AS preco_varejo,
             (
                 COALESCE(tc_counts.custo_override_count, 0)
                 + COALESCE(te_counts.custo_override_count, 0)
@@ -349,14 +408,17 @@ pub async fn list_tecidos(pool: &PgPool) -> Result<Vec<TecidoRecord>, sqlx::Erro
             GREATEST(tc_counts.preco_atacado_override_max, te_counts.preco_atacado_override_max)::float8 AS preco_atacado_override_max,
             LEAST(tc_counts.preco_varejo_override_min, te_counts.preco_varejo_override_min)::float8 AS preco_varejo_override_min,
             GREATEST(tc_counts.preco_varejo_override_max, te_counts.preco_varejo_override_max)::float8 AS preco_varejo_override_max,
-            rendimento_m_kg::float8 AS rendimento_m_kg,
-            gramatura_linear_g_m,
-            gramatura_g_m2,
-            tipo,
-            transparencia,
-            elasticidade,
-            acabamento
+            tecidos.rendimento_m_kg::float8 AS rendimento_m_kg,
+            tecidos.gramatura_linear_g_m,
+            tecidos.gramatura_g_m2,
+            tecidos.tipo,
+            tecidos.transparencia,
+            tecidos.elasticidade,
+            tecidos.acabamento,
+            tecidos.fornecedor_id,
+            f.nome AS fornecedor_nome
         FROM tecidos
+        LEFT JOIN fornecedores f ON f.id = tecidos.fornecedor_id
         LEFT JOIN (
             SELECT
                 tecido_id,
@@ -422,11 +484,18 @@ pub async fn list_tecidos(pool: &PgPool) -> Result<Vec<TecidoRecord>, sqlx::Erro
             transparencia: row.get("transparencia"),
             elasticidade: row.get("elasticidade"),
             acabamento: row.get("acabamento"),
+            fornecedor_id: row.get("fornecedor_id"),
+            fornecedor_nome: row.get("fornecedor_nome"),
         })
         .collect())
 }
 
-pub async fn insert_tecido(pool: &PgPool, form: &TecidoForm, sku: &str) -> Result<(), sqlx::Error> {
+pub async fn insert_tecido(
+    pool: &PgPool,
+    form: &TecidoForm,
+    sku: &str,
+    fornecedor_id: Option<i64>,
+) -> Result<(), sqlx::Error> {
     let calculated = form.calculated_values();
     let largura_m = parse_largura_m(&form.largura).unwrap_or_default();
     let custo_base = parse_number(&form.custo_base).filter(|value| *value >= 0.0);
@@ -448,9 +517,10 @@ pub async fn insert_tecido(pool: &PgPool, form: &TecidoForm, sku: &str) -> Resul
             tipo,
             transparencia,
             elasticidade,
-            acabamento
+            acabamento,
+            fornecedor_id
         )
-        VALUES ($1, $2, $3, $4::numeric, $5::numeric, $6::numeric, $7, $8, $9, $10, $11, $12)
+        VALUES ($1, $2, $3, $4::numeric, $5::numeric, $6::numeric, $7, $8, $9, $10, $11, $12, $13)
         "#,
     )
     .bind(form.nome.trim())
@@ -465,6 +535,7 @@ pub async fn insert_tecido(pool: &PgPool, form: &TecidoForm, sku: &str) -> Resul
     .bind(form.transparencia.value(NIVEL_OPTIONS))
     .bind(form.elasticidade.value(NIVEL_OPTIONS))
     .bind(form.acabamento.value(ACABAMENTO_OPTIONS))
+    .bind(fornecedor_id)
     .execute(pool)
     .await?;
 
@@ -476,6 +547,7 @@ pub async fn update_tecido(
     id: i64,
     form: &TecidoForm,
     sku: &str,
+    fornecedor_id: Option<i64>,
 ) -> Result<(), sqlx::Error> {
     let calculated = form.calculated_values();
     let largura_m = parse_largura_m(&form.largura).unwrap_or_default();
@@ -499,8 +571,9 @@ pub async fn update_tecido(
             tipo = $9,
             transparencia = $10,
             elasticidade = $11,
-            acabamento = $12
-        WHERE id = $13
+            acabamento = $12,
+            fornecedor_id = $13
+        WHERE id = $14
         "#,
     )
     .bind(form.nome.trim())
@@ -515,6 +588,7 @@ pub async fn update_tecido(
     .bind(form.transparencia.value(NIVEL_OPTIONS))
     .bind(form.elasticidade.value(NIVEL_OPTIONS))
     .bind(form.acabamento.value(ACABAMENTO_OPTIONS))
+    .bind(fornecedor_id)
     .bind(id)
     .execute(pool)
     .await?;
@@ -587,6 +661,77 @@ pub async fn delete_cor(pool: &PgPool, id: i64) -> Result<(), sqlx::Error> {
         .execute(pool)
         .await?;
 
+    Ok(())
+}
+
+pub async fn list_fornecedores(pool: &PgPool) -> Result<Vec<FornecedorRecord>, sqlx::Error> {
+    let rows = sqlx::query(
+        r#"
+        SELECT id, nome, empresa, telefone, endereco
+        FROM fornecedores
+        ORDER BY nome, id
+        "#,
+    )
+    .fetch_all(pool)
+    .await?;
+
+    Ok(rows
+        .into_iter()
+        .map(|row| FornecedorRecord {
+            id: row.get("id"),
+            nome: row.get("nome"),
+            empresa: row.get("empresa"),
+            telefone: row.get("telefone"),
+            endereco: row.get("endereco"),
+        })
+        .collect())
+}
+
+pub async fn insert_fornecedor(
+    pool: &PgPool,
+    nome: &str,
+    empresa: &str,
+    telefone: &str,
+    endereco: &str,
+) -> Result<(), sqlx::Error> {
+    sqlx::query(
+        "INSERT INTO fornecedores (nome, empresa, telefone, endereco) VALUES ($1, $2, $3, $4)",
+    )
+    .bind(nome.trim())
+    .bind(empresa.trim())
+    .bind(telefone.trim())
+    .bind(endereco.trim())
+    .execute(pool)
+    .await?;
+    Ok(())
+}
+
+pub async fn update_fornecedor(
+    pool: &PgPool,
+    id: i64,
+    nome: &str,
+    empresa: &str,
+    telefone: &str,
+    endereco: &str,
+) -> Result<(), sqlx::Error> {
+    sqlx::query(
+        "UPDATE fornecedores SET nome = $1, empresa = $2, telefone = $3, endereco = $4 WHERE id = $5",
+    )
+    .bind(nome.trim())
+    .bind(empresa.trim())
+    .bind(telefone.trim())
+    .bind(endereco.trim())
+    .bind(id)
+    .execute(pool)
+    .await?;
+    Ok(())
+}
+
+pub async fn delete_fornecedor(pool: &PgPool, id: i64) -> Result<(), sqlx::Error> {
+    sqlx::query("DELETE FROM fornecedores WHERE id = $1")
+        .bind(id)
+        .execute(pool)
+        .await?;
     Ok(())
 }
 

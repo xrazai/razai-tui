@@ -2825,6 +2825,7 @@ dependencies = [
  "sqlx",
  "tokio",
  "windows 0.62.2",
+ "windows-collections",
 ]
 
 [[package]]

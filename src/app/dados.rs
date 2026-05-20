@@ -1,10 +1,4 @@
-use std::{
-    fs,
-    path::Path,
-    sync::mpsc,
-    thread,
-    time::{Duration, Instant},
-};
+use std::{fs, path::Path, thread, time::Duration};
 
 use super::{App, VinculoImageUploadResult};
 use crate::{
@@ -35,6 +29,12 @@ impl App {
         if self.tecido_select_dropdown.is_some() {
             match key {
                 KeyCode::Esc | KeyCode::Enter => self.tecido_select_dropdown = None,
+                KeyCode::Up if self.tecido_select_dropdown == Some(TecidoField::Fornecedor) => {
+                    self.previous_tecido_fornecedor()
+                }
+                KeyCode::Down if self.tecido_select_dropdown == Some(TecidoField::Fornecedor) => {
+                    self.next_tecido_fornecedor()
+                }
                 KeyCode::Up => self.tecido_form.previous_select_option(),
                 KeyCode::Down => self.tecido_form.next_select_option(),
                 _ => {}
@@ -56,7 +56,10 @@ impl App {
             KeyCode::Enter if self.tecido_form.selected_field == TecidoField::Voltar => {
                 self.voltar_dados();
             }
-            KeyCode::Enter if self.tecido_form.selected_field.is_select() => {
+            KeyCode::Enter
+                if self.tecido_form.selected_field.is_select()
+                    || self.tecido_form.selected_field == TecidoField::Fornecedor =>
+            {
                 self.tecido_select_dropdown = Some(self.tecido_form.selected_field);
             }
             KeyCode::Enter => self.tecido_form.next_field(),
@@ -128,6 +131,39 @@ impl App {
             _ => {}
         }
     }
+
+    pub(super) fn handle_fornecedor_form_key(&mut self, key: KeyCode) {
+        if self.pending_delete {
+            match key {
+                KeyCode::Char('s') | KeyCode::Char('S') => self.excluir_fornecedor_confirmado(),
+                KeyCode::Char('n') | KeyCode::Char('N') | KeyCode::Esc => {
+                    self.pending_delete = false
+                }
+                _ => {}
+            }
+            return;
+        }
+
+        match key {
+            KeyCode::Esc => self.voltar_dados(),
+            KeyCode::Backspace => self.fornecedor_form.backspace(),
+            KeyCode::Up => self.fornecedor_form.previous_field(),
+            KeyCode::Down => self.fornecedor_form.next_field(),
+            KeyCode::Enter if self.fornecedor_form.selected_field == FornecedorField::Confirmar => {
+                self.confirmar_fornecedor();
+            }
+            KeyCode::Enter if self.fornecedor_form.selected_field == FornecedorField::Voltar => {
+                self.voltar_dados();
+            }
+            KeyCode::Enter if self.fornecedor_form.selected_field == FornecedorField::Excluir => {
+                self.pending_delete = true;
+            }
+            KeyCode::Enter => self.fornecedor_form.next_field(),
+            KeyCode::Char(character) => self.fornecedor_form.push(character),
+            _ => {}
+        }
+    }
+
     pub(super) fn voltar_dados(&mut self) {
         match self.dados_screen {
             DadosScreen::CadastrarTecido => {
@@ -148,6 +184,12 @@ impl App {
                 self.editing_estampa_id = None;
                 self.pending_delete = false;
                 self.dados_screen = DadosScreen::Estampas;
+            }
+            DadosScreen::CadastrarFornecedor => {
+                self.fornecedor_form = FornecedorForm::default();
+                self.editing_fornecedor_id = None;
+                self.pending_delete = false;
+                self.dados_screen = DadosScreen::Fornecedores;
             }
             DadosScreen::VinculosSelecionarCores | DadosScreen::VinculosLista => {
                 self.dados_screen = DadosScreen::VinculosMenu;
@@ -180,6 +222,7 @@ impl App {
             DadosScreen::Tecidos
             | DadosScreen::Cores
             | DadosScreen::Estampas
+            | DadosScreen::Fornecedores
             | DadosScreen::VinculosMenu
             | DadosScreen::ListaPrecosMenu => {
                 self.dados_screen = DadosScreen::Menu;
@@ -197,22 +240,28 @@ impl App {
 
         let sku = self.tecido_form.sku(&self.tecidos, self.editing_tecido_id);
         let nome = self.tecido_form.nome.trim().to_string();
+        let fornecedor_id = self.selected_tecido_fornecedor_id();
 
         match (self.editing_tecido_id, &self.db_pool) {
             (Some(id), Some(pool)) => {
-                if let Err(error) =
-                    self.db_runtime
-                        .block_on(db::update_tecido(pool, id, &self.tecido_form, &sku))
-                {
+                if let Err(error) = self.db_runtime.block_on(db::update_tecido(
+                    pool,
+                    id,
+                    &self.tecido_form,
+                    &sku,
+                    fornecedor_id,
+                )) {
                     self.db_status = format!("Erro ao salvar no banco: {error}");
                     return;
                 }
             }
             (None, Some(pool)) => {
-                if let Err(error) =
-                    self.db_runtime
-                        .block_on(db::insert_tecido(pool, &self.tecido_form, &sku))
-                {
+                if let Err(error) = self.db_runtime.block_on(db::insert_tecido(
+                    pool,
+                    &self.tecido_form,
+                    &sku,
+                    fornecedor_id,
+                )) {
                     self.db_status = format!("Erro ao salvar no banco: {error}");
                     return;
                 }
@@ -224,6 +273,7 @@ impl App {
         self.db_status = String::from("Tecido salvo no banco local");
         self.tecido_form = TecidoForm::default();
         self.tecido_select_dropdown = None;
+        self.tecido_fornecedor_option = 0;
         self.editing_tecido_id = None;
         self.pending_delete = false;
         self.tecido_option = self
@@ -238,6 +288,7 @@ impl App {
     pub(super) fn open_new_tecido(&mut self) {
         self.tecido_form = TecidoForm::default();
         self.tecido_select_dropdown = None;
+        self.tecido_fornecedor_option = 0;
         self.editing_tecido_id = None;
         self.pending_delete = false;
         self.dados_screen = DadosScreen::CadastrarTecido;
@@ -249,9 +300,39 @@ impl App {
         };
         self.tecido_form = TecidoForm::from_record(tecido);
         self.tecido_select_dropdown = None;
+        self.tecido_fornecedor_option = tecido
+            .fornecedor_id
+            .and_then(|id| {
+                self.fornecedores
+                    .iter()
+                    .position(|fornecedor| fornecedor.id == id)
+                    .map(|index| index + 1)
+            })
+            .unwrap_or(0);
         self.editing_tecido_id = Some(tecido.id);
         self.pending_delete = false;
         self.dados_screen = DadosScreen::CadastrarTecido;
+    }
+
+    fn selected_tecido_fornecedor_id(&self) -> Option<i64> {
+        self.tecido_fornecedor_option
+            .checked_sub(1)
+            .and_then(|index| self.fornecedores.get(index))
+            .map(|fornecedor| fornecedor.id)
+    }
+
+    fn next_tecido_fornecedor(&mut self) {
+        let total = self.fornecedores.len() + 1;
+        if total > 0 {
+            self.tecido_fornecedor_option = (self.tecido_fornecedor_option + 1) % total;
+        }
+    }
+
+    fn previous_tecido_fornecedor(&mut self) {
+        let total = self.fornecedores.len() + 1;
+        if total > 0 {
+            self.tecido_fornecedor_option = (self.tecido_fornecedor_option + total - 1) % total;
+        }
     }
 
     pub(super) fn excluir_tecido_confirmado(&mut self) {
@@ -472,6 +553,92 @@ impl App {
         self.dados_screen = DadosScreen::Estampas;
     }
 
+    pub(super) fn open_new_fornecedor(&mut self) {
+        self.fornecedor_form = FornecedorForm::default();
+        self.editing_fornecedor_id = None;
+        self.pending_delete = false;
+        self.dados_screen = DadosScreen::CadastrarFornecedor;
+    }
+
+    pub(super) fn open_edit_fornecedor(&mut self, index: usize) {
+        let Some(fornecedor) = self.fornecedores.get(index) else {
+            return;
+        };
+        self.fornecedor_form = FornecedorForm::from_record(fornecedor);
+        self.editing_fornecedor_id = Some(fornecedor.id);
+        self.pending_delete = false;
+        self.dados_screen = DadosScreen::CadastrarFornecedor;
+    }
+
+    pub(super) fn confirmar_fornecedor(&mut self) {
+        if !self.fornecedor_form.is_valid() {
+            return;
+        }
+
+        let nome = self.fornecedor_form.nome.trim().to_string();
+        if let Some(pool) = &self.db_pool {
+            let result = match self.editing_fornecedor_id {
+                Some(id) => self.db_runtime.block_on(db::update_fornecedor(
+                    pool,
+                    id,
+                    &self.fornecedor_form.nome,
+                    &self.fornecedor_form.empresa,
+                    &self.fornecedor_form.telefone,
+                    &self.fornecedor_form.endereco,
+                )),
+                None => self.db_runtime.block_on(db::insert_fornecedor(
+                    pool,
+                    &self.fornecedor_form.nome,
+                    &self.fornecedor_form.empresa,
+                    &self.fornecedor_form.telefone,
+                    &self.fornecedor_form.endereco,
+                )),
+            };
+            if let Err(error) = result {
+                self.db_status = format!("Erro ao salvar fornecedor: {error}");
+                return;
+            }
+        }
+
+        self.reload_fornecedores();
+        self.db_status = String::from("Fornecedor salvo no banco local");
+        self.fornecedor_form = FornecedorForm::default();
+        self.editing_fornecedor_id = None;
+        self.pending_delete = false;
+        self.cor_option = self
+            .fornecedores
+            .iter()
+            .position(|fornecedor| fornecedor.nome == nome)
+            .map(|index| index + 1)
+            .unwrap_or(0);
+        self.dados_screen = DadosScreen::Fornecedores;
+    }
+
+    pub(super) fn excluir_fornecedor_confirmado(&mut self) {
+        let Some(id) = self.editing_fornecedor_id else {
+            self.pending_delete = false;
+            return;
+        };
+        let Some(pool) = &self.db_pool else {
+            self.db_status = String::from("Banco local indisponivel para excluir fornecedor");
+            self.pending_delete = false;
+            return;
+        };
+
+        if let Err(error) = self.db_runtime.block_on(db::delete_fornecedor(pool, id)) {
+            self.db_status = format!("Erro ao excluir fornecedor: {error}");
+            self.pending_delete = false;
+            return;
+        }
+        self.reload_fornecedores();
+        self.db_status = String::from("Fornecedor excluido do banco local");
+        self.fornecedor_form = FornecedorForm::default();
+        self.editing_fornecedor_id = None;
+        self.pending_delete = false;
+        self.cor_option = 0;
+        self.dados_screen = DadosScreen::Fornecedores;
+    }
+
     pub(super) fn reload_tecidos(&mut self) {
         if let Some(pool) = &self.db_pool {
             match self.db_runtime.block_on(db::list_tecidos(pool)) {
@@ -495,6 +662,15 @@ impl App {
             match self.db_runtime.block_on(db::list_estampas(pool)) {
                 Ok(estampas) => self.estampas = estampas,
                 Err(error) => self.db_status = format!("Erro ao recarregar estampas: {error}"),
+            }
+        }
+    }
+
+    pub(super) fn reload_fornecedores(&mut self) {
+        if let Some(pool) = &self.db_pool {
+            match self.db_runtime.block_on(db::list_fornecedores(pool)) {
+                Ok(fornecedores) => self.fornecedores = fornecedores,
+                Err(error) => self.db_status = format!("Erro ao recarregar fornecedores: {error}"),
             }
         }
     }
@@ -619,6 +795,24 @@ impl App {
         }
     }
 
+    pub(super) fn handle_lista_precos_tecido_selected_value_key(&mut self, key: KeyCode) -> bool {
+        if self.lista_precos_tecido_detail_option != 0 || self.editing_lista_preco_tecido {
+            return false;
+        }
+
+        let KeyCode::Char(character) = key else {
+            return false;
+        };
+        if !is_money_input_char(character) {
+            return false;
+        }
+
+        self.editing_lista_preco_tecido = true;
+        self.lista_precos_tecido_input.clear();
+        self.lista_precos_tecido_input.push(character);
+        true
+    }
+
     fn open_lista_precos_vinculos(&mut self) {
         let Some(tecido) = self.tecidos.get(self.lista_precos_tecido_option) else {
             return;
@@ -722,10 +916,11 @@ impl App {
             }
         };
         let usa_estampas = tecido.tipo == "Estampado";
+        let tecido_id = tecido.id;
 
         match self.db_runtime.block_on(db::update_vinculo_preco_override(
             pool,
-            tecido.id,
+            tecido_id,
             vinculo.cor_id,
             usa_estampas,
             self.lista_precos_tipo,
@@ -733,7 +928,15 @@ impl App {
         )) {
             Ok(()) => {
                 self.editing_lista_preco_vinculo = false;
-                self.load_vinculos(tecido.id);
+                self.reload_tecidos();
+                if let Some(index) = self
+                    .tecidos
+                    .iter()
+                    .position(|tecido| tecido.id == tecido_id)
+                {
+                    self.lista_precos_tecido_option = index;
+                }
+                self.load_vinculos(tecido_id);
                 self.refresh_lista_precos_vinculo_input();
                 self.db_status = if valor_override.is_some() {
                     format!("{} especifico salvo.", self.lista_precos_tipo.value_label())
@@ -987,7 +1190,7 @@ impl App {
     }
 
     fn abrir_dialogo_e_salvar_vinculo_image(&mut self) {
-        if self.vinculo_image_upload_rx.is_some() {
+        if self.vinculo_image_upload_task.is_running() {
             self.db_status = String::from("Aguarde o upload da imagem atual terminar.");
             return;
         }
@@ -1009,36 +1212,25 @@ impl App {
         };
         let slot = self.vinculo_image_slot;
         let pool = pool.clone();
-        let (tx, rx) = mpsc::channel();
 
-        self.vinculo_image_upload_started = Some(Instant::now());
-        self.vinculo_image_upload_rx = Some(rx);
         self.db_status = format!("Salvando {}...", slot.title());
-
-        thread::spawn(move || {
+        self.vinculo_image_upload_task.start(move || {
             let result =
                 save_vinculo_image_upload(pool, path, tecido_id, item_id, usa_estampas, slot);
-            let _ = tx.send(VinculoImageUploadResult {
+            VinculoImageUploadResult {
                 tecido_id,
                 item_id,
                 usa_estampas,
                 slot,
                 result,
-            });
+            }
         });
     }
 
     pub(super) fn drain_vinculo_image_upload(&mut self) {
-        let upload = self
-            .vinculo_image_upload_rx
-            .as_ref()
-            .and_then(|receiver| receiver.try_recv().ok());
-        let Some(upload) = upload else {
+        let Some(upload) = self.vinculo_image_upload_task.try_recv() else {
             return;
         };
-
-        self.vinculo_image_upload_started = None;
-        self.vinculo_image_upload_rx = None;
 
         match upload.result {
             Ok(()) => {
@@ -1223,6 +1415,10 @@ fn money_matches(value: f64, base: Option<f64>) -> bool {
         return false;
     };
     (value * 100.0).round() as i64 == (base * 100.0).round() as i64
+}
+
+fn is_money_input_char(character: char) -> bool {
+    character.is_ascii_digit() || matches!(character, ',' | '.')
 }
 
 fn tecido_lista_valor(tecido: &TecidoRecord, tipo: ListaPrecoTipo) -> Option<f64> {

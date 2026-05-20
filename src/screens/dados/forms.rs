@@ -7,13 +7,91 @@ use ratatui::{
 };
 
 use crate::{
-    db::{CorRecord, EstampaRecord, TecidoRecord},
+    db::{CorRecord, EstampaRecord, FornecedorRecord, TecidoRecord},
     models::*,
     ui::{
-        DIALOG_BG, SIDE_PANEL_WIDTH, centered_rect, color_swatch, render_dialog_background,
+        SIDE_PANEL_WIDTH, color_swatch, destructive_action_line, render_destructive_confirm_dialog,
         selected_style,
     },
 };
+
+pub(super) fn render_cadastrar_fornecedor(
+    frame: &mut Frame,
+    area: Rect,
+    form: &FornecedorForm,
+    editing_id: Option<i64>,
+    pending_delete: bool,
+) {
+    let lines = vec![
+        format_fornecedor_field(
+            FornecedorField::Nome,
+            form.selected_field,
+            "Nome *",
+            &form.nome,
+        ),
+        format_fornecedor_field(
+            FornecedorField::Empresa,
+            form.selected_field,
+            "Empresa",
+            &form.empresa,
+        ),
+        format_fornecedor_field(
+            FornecedorField::Telefone,
+            form.selected_field,
+            "Telefone",
+            &form.telefone,
+        ),
+        format_fornecedor_field(
+            FornecedorField::Endereco,
+            form.selected_field,
+            "Endereco",
+            &form.endereco,
+        ),
+        Line::from(""),
+        format_fornecedor_action(
+            FornecedorField::Confirmar,
+            form.selected_field,
+            "[Confirmar]",
+            form.is_valid(),
+        ),
+        format_fornecedor_action(
+            FornecedorField::Voltar,
+            form.selected_field,
+            "[Voltar]",
+            true,
+        ),
+        if editing_id.is_some() {
+            Line::from(vec![
+                Span::styled(
+                    if form.selected_field == FornecedorField::Excluir {
+                        "> "
+                    } else {
+                        "  "
+                    },
+                    selected_style(form.selected_field == FornecedorField::Excluir),
+                ),
+                Span::styled("[Excluir]", Style::default().fg(Color::Red)),
+            ])
+        } else {
+            Line::from("")
+        },
+    ];
+    let form_widget = Paragraph::new(Text::from(lines)).block(
+        Block::default()
+            .title("Dados > Fornecedor > Cadastrar Fornecedor")
+            .borders(Borders::ALL),
+    );
+    frame.render_widget(form_widget, area);
+
+    if pending_delete {
+        render_destructive_confirm_dialog(
+            frame,
+            area,
+            "Confirmar exclusao",
+            "Excluir este fornecedor?",
+        );
+    }
+}
 
 pub(super) fn render_cadastrar_cor(
     frame: &mut Frame,
@@ -47,7 +125,7 @@ pub(super) fn render_cadastrar_cor(
         ),
         format_cor_action(CorField::Voltar, form.selected_field, "[Voltar]", true),
         if editing_id.is_some() {
-            format_cor_action(CorField::Excluir, form.selected_field, "[Excluir]", true)
+            format_cor_delete(form.selected_field)
         } else {
             Line::from("")
         },
@@ -139,12 +217,7 @@ pub(super) fn render_cadastrar_estampa(
         ),
         format_estampa_action(EstampaField::Voltar, form.selected_field, "[Voltar]", true),
         if editing_id.is_some() {
-            format_estampa_action(
-                EstampaField::Excluir,
-                form.selected_field,
-                "[Excluir]",
-                true,
-            )
+            format_estampa_delete(form.selected_field)
         } else {
             Line::from("")
         },
@@ -179,6 +252,8 @@ pub(super) fn render_cadastrar_tecido(
     editing_tecido_id: Option<i64>,
     pending_delete: bool,
     dropdown: Option<TecidoField>,
+    fornecedores: &[FornecedorRecord],
+    fornecedor_option: usize,
 ) {
     let chunks = Layout::default()
         .direction(Direction::Horizontal)
@@ -242,6 +317,13 @@ pub(super) fn render_cadastrar_tecido(
         "Acabamento",
         form.acabamento.value(ACABAMENTO_OPTIONS),
         ACABAMENTO_OPTIONS,
+        dropdown,
+    );
+    push_fornecedor_select(
+        &mut fields,
+        form.selected_field,
+        fornecedores,
+        fornecedor_option,
         dropdown,
     );
     fields.extend([
@@ -364,6 +446,44 @@ fn push_select(
     }
 }
 
+fn push_fornecedor_select(
+    lines: &mut Vec<Line<'static>>,
+    selected: TecidoField,
+    fornecedores: &[FornecedorRecord],
+    fornecedor_option: usize,
+    dropdown: Option<TecidoField>,
+) {
+    let label = fornecedor_label(fornecedores, fornecedor_option);
+    lines.push(format_select(
+        TecidoField::Fornecedor,
+        selected,
+        "Fornecedor",
+        &label,
+    ));
+    if dropdown == Some(TecidoField::Fornecedor) {
+        lines.push(Line::from("    > [Sem fornecedor]"));
+        lines.extend(fornecedores.iter().enumerate().map(|(index, fornecedor)| {
+            let marker = if fornecedor_option == index + 1 {
+                "    > "
+            } else {
+                "      "
+            };
+            Line::from(vec![
+                Span::styled(marker, selected_style(fornecedor_option == index + 1)),
+                Span::raw(fornecedor.nome.clone()),
+            ])
+        }));
+    }
+}
+
+fn fornecedor_label(fornecedores: &[FornecedorRecord], fornecedor_option: usize) -> String {
+    fornecedor_option
+        .checked_sub(1)
+        .and_then(|index| fornecedores.get(index))
+        .map(|fornecedor| fornecedor.nome.clone())
+        .unwrap_or_else(|| String::from("Sem fornecedor"))
+}
+
 pub(super) fn format_cor_field(
     field: CorField,
     selected: CorField,
@@ -463,6 +583,42 @@ pub(super) fn format_estampa_action(
     ])
 }
 
+fn format_fornecedor_field(
+    field: FornecedorField,
+    selected: FornecedorField,
+    label: &str,
+    value: &str,
+) -> Line<'static> {
+    let marker = if field == selected { ">" } else { " " };
+    let value = if value.is_empty() { "_" } else { value };
+
+    Line::from(vec![
+        Span::styled(format!("{marker} "), selected_style(field == selected)),
+        Span::raw(format!("{label}: ")),
+        Span::styled(value.to_string(), Style::default().fg(Color::Yellow)),
+    ])
+}
+
+fn format_fornecedor_action(
+    field: FornecedorField,
+    selected: FornecedorField,
+    label: &str,
+    enabled: bool,
+) -> Line<'static> {
+    let marker = if field == selected { ">" } else { " " };
+    let suffix = if enabled {
+        ""
+    } else {
+        "  campos obrigatorios pendentes"
+    };
+
+    Line::from(vec![
+        Span::styled(format!("{marker} "), selected_style(field == selected)),
+        Span::raw(label.to_string()),
+        Span::raw(suffix),
+    ])
+}
+
 pub(super) fn format_submit(selected: TecidoField, valid: bool, _editing: bool) -> Line<'static> {
     let marker = if selected == TecidoField::Salvar {
         ">"
@@ -490,19 +646,7 @@ pub(super) fn format_delete(selected: TecidoField, editing: bool) -> Line<'stati
         return Line::from("");
     }
 
-    let marker = if selected == TecidoField::Excluir {
-        ">"
-    } else {
-        " "
-    };
-
-    Line::from(vec![
-        Span::styled(
-            format!("{marker} "),
-            selected_style(selected == TecidoField::Excluir),
-        ),
-        Span::raw("[Excluir]"),
-    ])
+    destructive_action_line(TecidoField::Excluir, selected, "[Excluir]")
 }
 
 pub(super) fn format_tecido_action(
@@ -518,18 +662,13 @@ pub(super) fn format_tecido_action(
 }
 
 pub(super) fn render_confirm_dialog(frame: &mut Frame, area: Rect, message: &str) {
-    let popup_area = centered_rect(54, 7, area);
-    render_dialog_background(frame, popup_area);
-    let dialog = Paragraph::new(format!("{message}\n\nS = confirmar   N/Esc = cancelar"))
-        .block(
-            Block::default()
-                .title("Confirmacao destrutiva")
-                .borders(Borders::ALL)
-                .style(Style::default().bg(DIALOG_BG))
-                .border_style(Style::default().fg(Color::Cyan)),
-        )
-        .style(Style::default().bg(DIALOG_BG))
-        .alignment(Alignment::Center);
+    render_destructive_confirm_dialog(frame, area, "Confirmacao destrutiva", message);
+}
 
-    frame.render_widget(dialog, popup_area);
+fn format_cor_delete(selected: CorField) -> Line<'static> {
+    destructive_action_line(CorField::Excluir, selected, "[Excluir]")
+}
+
+fn format_estampa_delete(selected: EstampaField) -> Line<'static> {
+    destructive_action_line(EstampaField::Excluir, selected, "[Excluir]")
 }

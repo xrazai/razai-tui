@@ -1,21 +1,8 @@
-use std::{
-    env, fs, panic,
-    path::{Path, PathBuf},
-    sync::mpsc,
-    thread,
-    time::Instant,
-};
+use std::{env, fs, panic, path::PathBuf};
 
 use crossterm::event::KeyCode;
-use windows::{
-    Win32::{
-        Foundation::HWND,
-        UI::{Shell::ShellExecuteW, WindowsAndMessaging::SW_SHOWNORMAL},
-    },
-    core::PCWSTR,
-};
 
-use super::App;
+use super::{App, ChecklistPdfResult};
 use crate::{db, db::TecidoRecord, models::Section};
 
 mod pdf;
@@ -100,7 +87,7 @@ impl App {
     }
 
     fn gerar_checklist_pdf(&mut self) {
-        if self.checklist_pdf_rx.is_some() {
+        if self.checklist_pdf_task.is_running() {
             self.db_status = String::from("Aguarde o checklist atual terminar.");
             return;
         }
@@ -120,22 +107,24 @@ impl App {
         };
 
         let pool = pool.clone();
-        let (tx, rx) = mpsc::channel();
-        self.checklist_pdf_started = Some(Instant::now());
-        self.checklist_pdf_rx = Some(rx);
         self.db_status = String::from("Gerando checklist em segundo plano...");
-
-        thread::spawn(move || {
-            let status = gerar_checklist_pdf_worker(pool, selected);
-            let _ = tx.send(status);
-        });
+        self.checklist_pdf_task
+            .start(move || gerar_checklist_pdf_worker(pool, selected));
     }
 }
 
-fn gerar_checklist_pdf_worker(pool: sqlx::PgPool, selected: Vec<TecidoRecord>) -> String {
+fn gerar_checklist_pdf_worker(
+    pool: sqlx::PgPool,
+    selected: Vec<TecidoRecord>,
+) -> ChecklistPdfResult {
     let runtime = match tokio::runtime::Runtime::new() {
         Ok(runtime) => runtime,
-        Err(error) => return format!("Erro ao iniciar gerador de checklist: {error}"),
+        Err(error) => {
+            return ChecklistPdfResult {
+                pdf_path: None,
+                status: format!("Erro ao iniciar gerador de checklist: {error}"),
+            };
+        }
     };
 
     let mut sections = Vec::new();
@@ -148,7 +137,10 @@ fn gerar_checklist_pdf_worker(pool: sqlx::PgPool, selected: Vec<TecidoRecord>) -
         match result {
             Ok(vinculos) => sections.push(pdf::ChecklistSection { tecido, vinculos }),
             Err(error) => {
-                return format!("Erro ao carregar vinculos do checklist: {error}");
+                return ChecklistPdfResult {
+                    pdf_path: None,
+                    status: format!("Erro ao carregar vinculos do checklist: {error}"),
+                };
             }
         }
     }
@@ -156,7 +148,10 @@ fn gerar_checklist_pdf_worker(pool: sqlx::PgPool, selected: Vec<TecidoRecord>) -
     let path = match checklist_pdf_path() {
         Ok(path) => path,
         Err(error) => {
-            return error;
+            return ChecklistPdfResult {
+                pdf_path: None,
+                status: error,
+            };
         }
     };
 
@@ -164,17 +159,14 @@ fn gerar_checklist_pdf_worker(pool: sqlx::PgPool, selected: Vec<TecidoRecord>) -
         .map_err(|_| String::from("falha interna ao gerar checklist; tente menos tecidos por PDF"));
 
     match write_result.and_then(|result| result) {
-        Ok(()) => match abrir_impressao_checklist(&path) {
-            Ok(()) => format!(
-                "Checklist gerado e enviado para a tela de impressao: {}",
-                path.display()
-            ),
-            Err(error) => format!(
-                "Checklist gerado em {}. Falha ao abrir impressao: {error}",
-                path.display()
-            ),
+        Ok(()) => ChecklistPdfResult {
+            pdf_path: Some(path.to_string_lossy().to_string()),
+            status: format!("Checklist gerado: {}", path.display()),
         },
-        Err(error) => format!("Erro ao gerar checklist: {error}"),
+        Err(error) => ChecklistPdfResult {
+            pdf_path: None,
+            status: format!("Erro ao gerar checklist: {error}"),
+        },
     }
 }
 
@@ -194,40 +186,21 @@ fn checklist_pdf_dir() -> PathBuf {
         .unwrap_or_else(|| env::temp_dir().join("Razai").join("checklists"))
 }
 
-fn abrir_impressao_checklist(path: &Path) -> Result<(), String> {
-    let path = path
-        .canonicalize()
-        .map_err(|error| format!("nao foi possivel localizar o PDF: {error}"))?;
-    shell_execute_pdf("print", &path).or_else(|print_error| {
-        shell_execute_pdf("open", &path).map_err(|open_error| {
-            format!("print falhou: {print_error}; abrir PDF tambem falhou: {open_error}")
-        })
-    })?;
-    Ok(())
-}
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::path::Path;
 
-fn shell_execute_pdf(verb: &str, path: &Path) -> Result<(), String> {
-    let verb = wide_null(verb);
-    let file = wide_null(&path.to_string_lossy());
-    let result = unsafe {
-        ShellExecuteW(
-            Some(HWND::default()),
-            PCWSTR(verb.as_ptr()),
-            PCWSTR(file.as_ptr()),
-            PCWSTR::null(),
-            PCWSTR::null(),
-            SW_SHOWNORMAL,
-        )
-    };
-    if result.0 as isize <= 32 {
-        return Err(format!(
-            "ShellExecuteW falhou com codigo {}",
-            result.0 as isize
-        ));
+    #[test]
+    fn checklist_pdf_dir_stays_outside_workspace() {
+        let dir = checklist_pdf_dir();
+        let workspace = PathBuf::from(env!("CARGO_MANIFEST_DIR"));
+
+        assert!(
+            !dir.starts_with(&workspace),
+            "checklist PDF dir must stay outside workspace to avoid cargo watch restarts: {}",
+            dir.display()
+        );
+        assert!(dir.ends_with(Path::new("Razai").join("checklists")));
     }
-    Ok(())
-}
-
-fn wide_null(value: &str) -> Vec<u16> {
-    value.encode_utf16().chain(std::iter::once(0)).collect()
 }
