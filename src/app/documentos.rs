@@ -1,4 +1,10 @@
-use std::{env, fs, panic, path::Path, path::PathBuf};
+use std::{
+    env, fs, panic,
+    path::{Path, PathBuf},
+    sync::mpsc,
+    thread,
+    time::Instant,
+};
 
 use crossterm::event::KeyCode;
 use windows::{
@@ -10,7 +16,7 @@ use windows::{
 };
 
 use super::App;
-use crate::{db, models::Section};
+use crate::{db, db::TecidoRecord, models::Section};
 
 mod pdf;
 
@@ -94,6 +100,10 @@ impl App {
     }
 
     fn gerar_checklist_pdf(&mut self) {
+        if self.checklist_pdf_rx.is_some() {
+            self.db_status = String::from("Aguarde o checklist atual terminar.");
+            return;
+        }
         let selected = self
             .tecidos
             .iter()
@@ -109,52 +119,62 @@ impl App {
             return;
         };
 
-        let mut sections = Vec::new();
-        for tecido in selected {
-            let result = if tecido.tipo == "Estampado" {
-                self.db_runtime
-                    .block_on(db::list_estampa_vinculos_by_tecido(pool, tecido.id))
-            } else {
-                self.db_runtime
-                    .block_on(db::list_vinculos_by_tecido(pool, tecido.id))
-            };
-            match result {
-                Ok(vinculos) => sections.push(pdf::ChecklistSection { tecido, vinculos }),
-                Err(error) => {
-                    self.db_status = format!("Erro ao carregar vinculos do checklist: {error}");
-                    return;
-                }
-            }
-        }
+        let pool = pool.clone();
+        let (tx, rx) = mpsc::channel();
+        self.checklist_pdf_started = Some(Instant::now());
+        self.checklist_pdf_rx = Some(rx);
+        self.db_status = String::from("Gerando checklist em segundo plano...");
 
-        let path = match checklist_pdf_path() {
-            Ok(path) => path,
-            Err(error) => {
-                self.db_status = error;
-                return;
-            }
+        thread::spawn(move || {
+            let status = gerar_checklist_pdf_worker(pool, selected);
+            let _ = tx.send(status);
+        });
+    }
+}
+
+fn gerar_checklist_pdf_worker(pool: sqlx::PgPool, selected: Vec<TecidoRecord>) -> String {
+    let runtime = match tokio::runtime::Runtime::new() {
+        Ok(runtime) => runtime,
+        Err(error) => return format!("Erro ao iniciar gerador de checklist: {error}"),
+    };
+
+    let mut sections = Vec::new();
+    for tecido in selected {
+        let result = if tecido.tipo == "Estampado" {
+            runtime.block_on(db::list_estampa_vinculos_by_tecido(&pool, tecido.id))
+        } else {
+            runtime.block_on(db::list_vinculos_by_tecido(&pool, tecido.id))
         };
-
-        let write_result = panic::catch_unwind(|| pdf::write_checklist_pdf(&path, &sections))
-            .map_err(|_| {
-                String::from("falha interna ao gerar checklist; tente menos tecidos por PDF")
-            });
-
-        match write_result.and_then(|result| result) {
-            Ok(()) => {
-                self.db_status = match abrir_impressao_checklist(&path) {
-                    Ok(()) => format!(
-                        "Checklist gerado e enviado para a tela de impressao: {}",
-                        path.display()
-                    ),
-                    Err(error) => format!(
-                        "Checklist gerado em {}. Falha ao abrir impressao: {error}",
-                        path.display()
-                    ),
-                };
+        match result {
+            Ok(vinculos) => sections.push(pdf::ChecklistSection { tecido, vinculos }),
+            Err(error) => {
+                return format!("Erro ao carregar vinculos do checklist: {error}");
             }
-            Err(error) => self.db_status = format!("Erro ao gerar checklist: {error}"),
         }
+    }
+
+    let path = match checklist_pdf_path() {
+        Ok(path) => path,
+        Err(error) => {
+            return error;
+        }
+    };
+
+    let write_result = panic::catch_unwind(|| pdf::write_checklist_pdf(&path, &sections))
+        .map_err(|_| String::from("falha interna ao gerar checklist; tente menos tecidos por PDF"));
+
+    match write_result.and_then(|result| result) {
+        Ok(()) => match abrir_impressao_checklist(&path) {
+            Ok(()) => format!(
+                "Checklist gerado e enviado para a tela de impressao: {}",
+                path.display()
+            ),
+            Err(error) => format!(
+                "Checklist gerado em {}. Falha ao abrir impressao: {error}",
+                path.display()
+            ),
+        },
+        Err(error) => format!("Erro ao gerar checklist: {error}"),
     }
 }
 

@@ -3,7 +3,7 @@ use ratatui::{
     layout::{Alignment, Constraint, Direction, Layout, Rect},
     style::{Color, Style},
     text::{Line, Span, Text},
-    widgets::{Block, Borders, List, ListItem, ListState, Paragraph},
+    widgets::{Block, Borders, List, ListItem, Paragraph},
 };
 
 use crate::{
@@ -11,8 +11,8 @@ use crate::{
     db::{TecidoRecord, VinculoRecord},
     models::{FinalizarVendaOption, VendaField, VendaItem, VendasScreen},
     ui::{
-        DIALOG_BG, SIDE_PANEL_WIDTH, centered_rect, color_swatch, render_dialog_background,
-        selected_style,
+        DIALOG_BG, SIDE_PANEL_WIDTH, centered_rect, color_swatch, list_state_with_lookahead,
+        render_dialog_background, selected_style,
     },
 };
 
@@ -125,8 +125,11 @@ fn render_historico(
             })
             .collect()
     };
-    let mut state = ListState::default()
-        .with_selected((!vendas.is_empty() && selected_field == 2).then_some(selected));
+    let mut state = list_state_with_lookahead(
+        (!vendas.is_empty() && selected_field == 2).then_some(selected),
+        items.len(),
+        chunks[1],
+    );
     let list = List::new(items)
         .block(
             Block::default()
@@ -160,7 +163,7 @@ fn render_menu(frame: &mut Frame, area: Rect, selected: usize) {
         .iter()
         .enumerate()
         .map(|(index, item)| ListItem::new(format!("{}. {}", index + 1, item)));
-    let mut state = ListState::default().with_selected(Some(selected));
+    let mut state = list_state_with_lookahead(Some(selected), 2, area);
     let list = List::new(items)
         .block(Block::default().title("Vendas").borders(Borders::ALL))
         .highlight_symbol("> ")
@@ -173,7 +176,7 @@ fn render_tecidos(frame: &mut Frame, area: Rect, selected: usize, tecidos: &[Tec
         .iter()
         .enumerate()
         .map(|(index, tecido)| ListItem::new(format!("{}. {}", index + 1, tecido.nome)));
-    let mut state = ListState::default().with_selected(Some(selected));
+    let mut state = list_state_with_lookahead(Some(selected), tecidos.len(), area);
     let list = List::new(items)
         .block(
             Block::default()
@@ -203,7 +206,7 @@ fn render_vinculos(frame: &mut Frame, area: Rect, selected: usize, vinculos: &[V
             })
             .collect()
     };
-    let mut state = ListState::default().with_selected(Some(selected));
+    let mut state = list_state_with_lookahead(Some(selected), items.len(), area);
     let list = List::new(items)
         .block(
             Block::default()

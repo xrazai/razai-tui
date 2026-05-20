@@ -46,6 +46,12 @@ Evitar arquivos com mais de 600 linhas. Se passar disso e houver um corte claro 
 - persistencia para `src/db.rs`
 - contexto de IA para `src/agent.rs`
 
+## UX TUI
+
+Acoes visuais entre colchetes, como `[Confirmar]`, `[Voltar]`, `[Gerar PDF]` e `[Desfazer Vinculo]`, devem ficar separadas do conteudo por uma linha vazia quando estiverem misturadas com dados de contexto. Essa linha vazia deve ser um item/linha proprio com mapeamento correto de selecao. Nao usar `\n` dentro do texto do item selecionavel, porque isso quebra o highlight do `ratatui`.
+
+Listas longas devem usar scroll antecipado, mantendo algumas linhas de contexto abaixo do item selecionado antes de chegar ao limite inferior da area visivel.
+
 ## Vinculos e Imagens
 
 Vinculos de tecidos lisos ficam em `tecido_cores`; vinculos de tecidos estampados ficam em `tecido_estampas`. Cada vinculo pode armazenar quatro imagens em colunas `BYTEA`: `imagem_original`, `imagem_brand`, `imagem_modelo` e `imagem_alternativa`. O custo padrao vem de `tecidos.custo_base`; quando uma cor ou estampa tiver custo diferente, o vinculo grava `custo_override` e passa a usar esse valor efetivo. Precos de venda ficam separados: `tecidos.preco_atacado` e `tecidos.preco_varejo` sao os valores base por tecido, enquanto `preco_atacado_override` e `preco_varejo_override` nos vinculos registram excecoes.
@@ -78,6 +84,18 @@ O banco local usa Docker/PostgreSQL. As migrations ficam em `migrations/`.
 
 O app tambem executa garantias de tabela para estruturas recentes, como `configuracoes` e `estampas`, para funcionar em bancos locais ja criados antes dessas migrations.
 
+## Lista de Precos
+
+`Dados > Lista de Precos` e o ponto operacional para valores do tecido:
+
+- `Custo Base`: grava `tecidos.custo_base` e excecoes em `custo_override` nos vinculos.
+- `Atacado`: grava `tecidos.preco_atacado` e excecoes em `preco_atacado_override`.
+- `Varejo`: grava `tecidos.preco_varejo` e excecoes em `preco_varejo_override`.
+
+O cadastro de tecido nao deve expor `custo_base` como campo principal. Se o usuario digitar em um vinculo o mesmo valor da base, o app remove o override e a origem volta a ser `base`.
+
+A primeira lista de tecidos precisa mostrar quando a base esta vazia mas existem excecoes, incluindo contagem e faixa de menor/maior valor quando disponivel.
+
 ## Configuracoes
 
 Configuracoes devem persistir no banco, na tabela `configuracoes`, com pares `chave`/`valor`.
@@ -96,6 +114,8 @@ Vendas finalizadas sao persistidas em `vendas` e `venda_itens`. O historico inic
 ## Pedidos
 
 Pedidos ficam persistidos em `pedidos` e `pedido_itens` com status `pendente` ou `aprovado`. Ao gerar um pedido, o app salva os itens, cria um PDF em `pdf_pedidos/` e abre o compartilhamento nativo do Windows com o PDF anexado. Ao aprovar um pedido pago, os itens sao registrados em `vendas` e o pedido passa para `aprovado`.
+
+A escrita do PDF de pedido deve ser tratada como trabalho potencialmente lento/falhavel. O fluxo deve proteger panics da biblioteca de PDF para nao derrubar a TUI e deve evoluir para worker em segundo plano com canal de retorno (`Receiver`), igual ao padrao de checklist, upload de imagens e Shopee. Enquanto o worker roda, a tela deve continuar responsiva e exibir progresso/status.
 
 ## Documentos
 

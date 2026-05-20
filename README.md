@@ -49,6 +49,12 @@ Notas:
 - `Space`: marcar/desmarcar itens em vinculos e marcar impressora
 - `Backspace`: apagar texto em campos editaveis
 
+## Regras de UX da TUI
+
+- Acoes visuais entre colchetes, como `[Confirmar]`, `[Voltar]`, `[Gerar PDF]` e `[Desfazer Vinculo]`, devem ficar separadas do conteudo/listagem por pelo menos uma linha vazia quando dividirem a tela com dados de contexto.
+- Essa separacao deve ser feita com uma linha/item vazio proprio e mapeamento correto da selecao. Nao coloque `\n` dentro do texto do item selecionavel, porque isso quebra o destaque visual do `ratatui`.
+- Menus compostos apenas por acoes podem permanecer compactos, desde que nao estejam misturados com uma listagem de dados.
+
 ## Abas
 
 - `Dashboard`: agente mestre para consultas e acoes com confirmacao.
@@ -105,6 +111,26 @@ Durante o upload, a janela nativa de selecao de arquivo e modal; depois que a im
 
 Arquivos em Google Drive/Drives compartilhados podem estar apenas parcialmente sincronizados. Se o app detectar leitura incompleta ou erro `unexpected end of file`, marque o arquivo/pasta como disponivel off-line, aguarde a sincronizacao terminar, ou copie/baixe a imagem para um disco local antes do upload.
 
+## Lista de Precos
+
+`Dados > Lista de Precos` centraliza valores operacionais de tecido:
+
+1. `Custo Base`
+2. `Atacado`
+3. `Varejo`
+
+O cadastro de tecido nao deve editar custo base diretamente. O custo base geral fica em `Lista de Precos > Custo Base`; precos de venda ficam em `Atacado` e `Varejo`.
+
+Cada lista permite:
+
+- definir o valor base do tecido;
+- abrir `[Vinculos / Excecoes]`;
+- informar um valor especifico para um vinculo quando uma cor/estampa fugir do valor geral;
+- apagar o valor especifico para voltar a usar a base;
+- digitar o mesmo valor da base para remover o override e manter origem `base`.
+
+Nas listas de primeiro nivel, tecidos com base vazia ainda devem mostrar se existem excecoes, incluindo contagem e faixa de menor/maior valor quando disponivel. Isso evita a impressao de que o tecido esta vazio quando valores individuais ja foram cadastrados.
+
 ## Vendas
 
 O fluxo de nova venda e:
@@ -131,6 +157,8 @@ Pedidos usam o mesmo fluxo de lancamento de vendas, mas geram uma pendencia em v
 3. Gerar pedido.
 4. O sistema salva o pedido como `pendente`, gera um PDF em `pdf_pedidos/` e abre o compartilhamento nativo do Windows com o PDF anexado.
 5. Depois do pagamento, abra o pedido no historico e aprove para converter em venda.
+
+Se a geracao do PDF falhar internamente, a TUI deve continuar aberta e exibir erro no status. A decisao de arquitetura e mover a geracao/compartilhamento de PDF de pedido para worker em segundo plano, seguindo o mesmo padrao ja usado por upload de imagens, checklist e operacoes Shopee.
 
 ## Documentos
 

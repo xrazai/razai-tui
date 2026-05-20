@@ -3,14 +3,17 @@ use ratatui::{
     layout::{Alignment, Constraint, Direction, Layout, Rect},
     style::{Color, Style},
     text::{Line, Span, Text},
-    widgets::{Block, Borders, List, ListItem, ListState, Paragraph},
+    widgets::{Block, Borders, List, ListItem, Paragraph},
 };
 
 use crate::{
     app::App,
     db::{PedidoRecord, TecidoRecord, VinculoRecord},
     models::{FinalizarVendaOption, PedidosScreen, VendaField, VendaItem},
-    ui::{DIALOG_BG, SIDE_PANEL_WIDTH, color_swatch, render_dialog_background, selected_style},
+    ui::{
+        DIALOG_BG, SIDE_PANEL_WIDTH, color_swatch, list_state_with_lookahead,
+        render_dialog_background, selected_style,
+    },
 };
 
 pub fn render(frame: &mut Frame, area: Rect, app: &App) {
@@ -64,7 +67,7 @@ fn render_menu(frame: &mut Frame, area: Rect, selected: usize) {
         .iter()
         .enumerate()
         .map(|(index, item)| ListItem::new(format!("{}. {}", index + 1, item)));
-    let mut state = ListState::default().with_selected(Some(selected));
+    let mut state = list_state_with_lookahead(Some(selected), 2, area);
     let list = List::new(items)
         .block(Block::default().title("Pedidos").borders(Borders::ALL))
         .highlight_symbol("> ")
@@ -77,7 +80,7 @@ fn render_tecidos(frame: &mut Frame, area: Rect, selected: usize, tecidos: &[Tec
         .iter()
         .enumerate()
         .map(|(index, tecido)| ListItem::new(format!("{}. {}", index + 1, tecido.nome)));
-    let mut state = ListState::default().with_selected(Some(selected));
+    let mut state = list_state_with_lookahead(Some(selected), tecidos.len(), area);
     let list = List::new(items)
         .block(
             Block::default()
@@ -107,7 +110,7 @@ fn render_vinculos(frame: &mut Frame, area: Rect, selected: usize, vinculos: &[V
             })
             .collect()
     };
-    let mut state = ListState::default().with_selected(Some(selected));
+    let mut state = list_state_with_lookahead(Some(selected), items.len(), area);
     let list = List::new(items)
         .block(
             Block::default()
@@ -247,7 +250,8 @@ fn render_historico(frame: &mut Frame, area: Rect, selected: usize, pedidos: &[P
             })
             .collect()
     };
-    let mut state = ListState::default().with_selected((!pedidos.is_empty()).then_some(selected));
+    let mut state =
+        list_state_with_lookahead((!pedidos.is_empty()).then_some(selected), items.len(), area);
     let list = List::new(items)
         .block(
             Block::default()

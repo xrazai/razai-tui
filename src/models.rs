@@ -105,6 +105,7 @@ pub enum DadosScreen {
     VinculosLista,
     VinculoDetalhe,
     ListaPrecosMenu,
+    ListaPrecosCusto,
     ListaPrecosAtacado,
     ListaPrecosVarejo,
     ListaPrecosTecido,
@@ -114,6 +115,7 @@ pub enum DadosScreen {
 #[derive(Clone, Copy, Default, Eq, PartialEq)]
 pub enum ListaPrecoTipo {
     #[default]
+    Custo,
     Atacado,
     Varejo,
 }
@@ -121,8 +123,17 @@ pub enum ListaPrecoTipo {
 impl ListaPrecoTipo {
     pub fn title(self) -> &'static str {
         match self {
+            Self::Custo => "Custo Base",
             Self::Atacado => "Atacado",
             Self::Varejo => "Varejo",
+        }
+    }
+
+    pub fn value_label(self) -> &'static str {
+        match self {
+            Self::Custo => "Custo base",
+            Self::Atacado => "Preco atacado",
+            Self::Varejo => "Preco varejo",
         }
     }
 }
@@ -494,7 +505,6 @@ impl TecidoForm {
             TecidoField::Nome => &mut self.nome,
             TecidoField::Composicao => &mut self.composicao,
             TecidoField::Largura => &mut self.largura,
-            TecidoField::CustoBase => &mut self.custo_base,
             TecidoField::Tipo
             | TecidoField::Transparencia
             | TecidoField::Elasticidade
@@ -525,7 +535,6 @@ pub enum TecidoField {
     Nome,
     Composicao,
     Largura,
-    CustoBase,
     Tipo,
     Transparencia,
     Elasticidade,
@@ -539,11 +548,10 @@ pub enum TecidoField {
 }
 
 impl TecidoField {
-    const ALL: [TecidoField; 14] = [
+    const ALL: [TecidoField; 13] = [
         TecidoField::Nome,
         TecidoField::Composicao,
         TecidoField::Largura,
-        TecidoField::CustoBase,
         TecidoField::Tipo,
         TecidoField::Transparencia,
         TecidoField::Elasticidade,

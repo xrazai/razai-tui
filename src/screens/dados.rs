@@ -5,7 +5,7 @@ use ratatui::{
     layout::{Constraint, Direction, Layout, Margin, Rect},
     style::{Color, Modifier, Style},
     text::{Line, Span},
-    widgets::{Block, Borders, List, ListItem, ListState, Paragraph},
+    widgets::{Block, Borders, List, ListItem, Paragraph},
 };
 use ratatui_image::Image as TuiImage;
 
@@ -13,7 +13,10 @@ use crate::{
     app::App,
     db::{CorRecord, EstampaRecord, TecidoRecord, VinculoRecord},
     models::*,
-    ui::{centered_rect, color_swatch, render_dialog_background},
+    ui::{
+        centered_rect, color_swatch, list_state_with_action_separators, list_state_with_lookahead,
+        render_dialog_background,
+    },
 };
 
 pub fn render(frame: &mut Frame, area: Rect, app: &App) {
@@ -92,9 +95,9 @@ pub fn render(frame: &mut Frame, area: Rect, app: &App) {
         DadosScreen::ListaPrecosMenu => {
             render_lista_precos_menu(frame, area, app.lista_precos_option)
         }
-        DadosScreen::ListaPrecosAtacado | DadosScreen::ListaPrecosVarejo => {
-            render_lista_precos(frame, area, app)
-        }
+        DadosScreen::ListaPrecosCusto
+        | DadosScreen::ListaPrecosAtacado
+        | DadosScreen::ListaPrecosVarejo => render_lista_precos(frame, area, app),
         DadosScreen::ListaPrecosTecido => render_lista_precos_tecido(frame, area, app),
         DadosScreen::ListaPrecosVinculos => render_lista_precos_vinculos(frame, area, app),
     }
@@ -110,7 +113,7 @@ fn render_menu(frame: &mut Frame, area: Rect, selected: DadosOption) {
         .iter()
         .enumerate()
         .map(|(index, option)| ListItem::new(format!("{}. {}", index + 1, option.title())));
-    let mut state = ListState::default().with_selected(Some(selected.index()));
+    let mut state = list_state_with_lookahead(Some(selected.index()), DadosOption::ALL.len(), area);
     let list = List::new(items)
         .block(Block::default().title("Dados").borders(Borders::ALL))
         .highlight_symbol("> ")
@@ -125,11 +128,18 @@ fn render_menu(frame: &mut Frame, area: Rect, selected: DadosOption) {
 }
 
 fn render_tecidos(frame: &mut Frame, area: Rect, selected: usize, tecidos: &[TecidoRecord]) {
-    let items = std::iter::once(String::from("[Cadastrar tecido]"))
-        .chain(tecidos.iter().map(|tecido| tecido.nome.clone()))
+    let items = std::iter::once(String::from("1. [Cadastrar tecido]"))
+        .chain(std::iter::once(String::new()))
+        .chain(
+            tecidos
+                .iter()
+                .enumerate()
+                .map(|(index, tecido)| format!("{}. {}", index + 2, tecido.nome)),
+        )
         .enumerate()
-        .map(|(index, tecido)| ListItem::new(format!("{}. {}", index + 1, tecido)));
-    let mut state = ListState::default().with_selected(Some(selected));
+        .map(|(_, tecido)| ListItem::new(tecido));
+    let item_count = tecidos.len() + 1;
+    let mut state = list_state_with_action_separators(Some(selected), item_count, area, &[1]);
     let list = List::new(items)
         .block(
             Block::default()
@@ -148,11 +158,11 @@ fn render_tecidos(frame: &mut Frame, area: Rect, selected: usize, tecidos: &[Tec
 }
 
 fn render_lista_precos_menu(frame: &mut Frame, area: Rect, selected: usize) {
-    let items = ["Atacado", "Varejo"]
+    let items = ["Custo Base", "Atacado", "Varejo"]
         .iter()
         .enumerate()
         .map(|(index, option)| ListItem::new(format!("{}. {}", index + 1, option)));
-    let mut state = ListState::default().with_selected(Some(selected));
+    let mut state = list_state_with_lookahead(Some(selected), 3, area);
     let list = List::new(items)
         .block(
             Block::default()
@@ -180,6 +190,7 @@ fn render_lista_precos(frame: &mut Frame, area: Rect, app: &App) {
                 let (index, tecido) = tecido;
                 let price = tecido_lista_preco(tecido, app.lista_precos_tipo);
                 let overrides = tecido_lista_override_count(tecido, app.lista_precos_tipo);
+                let override_summary = tecido_lista_override_summary(tecido, app.lista_precos_tipo);
                 ListItem::new(Line::from(vec![
                     Span::raw(format!("{}. ", index + 1)),
                     Span::styled(
@@ -187,20 +198,30 @@ fn render_lista_precos(frame: &mut Frame, area: Rect, app: &App) {
                         Style::default().fg(Color::Yellow),
                     ),
                     Span::raw(format!(
-                        " {} | custo R$ {} | preco R$ ",
+                        " {} | referencia R$ {} | {} R$ ",
                         tecido.nome,
-                        format_optional_money(tecido.custo_base)
+                        format_optional_money(tecido.custo_base),
+                        app.lista_precos_tipo.value_label().to_lowercase()
                     )),
                     Span::styled(
                         format_optional_money(price),
                         Style::default().fg(Color::Cyan),
                     ),
-                    Span::raw(format!(" | overrides {overrides}")),
+                    Span::raw(" | "),
+                    Span::styled(
+                        override_summary,
+                        if overrides > 0 {
+                            Style::default().fg(Color::Yellow)
+                        } else {
+                            Style::default().fg(Color::DarkGray)
+                        },
+                    ),
                 ]))
             })
             .collect()
     };
-    let mut state = ListState::default().with_selected(Some(app.lista_precos_tecido_option));
+    let mut state =
+        list_state_with_lookahead(Some(app.lista_precos_tecido_option), items.len(), area);
     let list = List::new(items)
         .block(
             Block::default()
@@ -233,16 +254,32 @@ fn render_lista_precos_tecido(frame: &mut Frame, area: Rect, app: &App) {
     } else {
         format_optional_money(current_price)
     };
+    let overrides = tecido_lista_override_count(tecido, app.lista_precos_tipo);
+    let value_status = if app.editing_lista_preco_tecido {
+        format!("R$ {value}")
+    } else if current_price.is_some() {
+        format!("R$ {value}")
+    } else if overrides > 0 {
+        format!("nao definido | {overrides} excecoes")
+    } else {
+        String::from("nao definido | sem excecoes")
+    };
     let items = [
         ListItem::new(format!(
-            "Preco {} do tecido: R$ {}",
-            app.lista_precos_tipo.title(),
-            value
+            "{} do tecido: {}",
+            app.lista_precos_tipo.value_label(),
+            value_status
         )),
+        ListItem::new(""),
         ListItem::new("[Vinculos / Excecoes]"),
         ListItem::new("[Voltar]"),
     ];
-    let mut state = ListState::default().with_selected(Some(app.lista_precos_tecido_detail_option));
+    let mut state = list_state_with_action_separators(
+        Some(app.lista_precos_tecido_detail_option),
+        3,
+        chunks[0],
+        &[1],
+    );
     let list = List::new(items)
         .block(
             Block::default()
@@ -257,7 +294,6 @@ fn render_lista_precos_tecido(frame: &mut Frame, area: Rect, app: &App) {
         .highlight_style(Style::default().fg(Color::Black).bg(Color::Cyan).bold());
     frame.render_stateful_widget(list, chunks[0], &mut state);
 
-    let overrides = tecido_lista_override_count(tecido, app.lista_precos_tipo);
     let summary = vec![
         Line::from(format!("SKU: {}", tecido.sku)),
         Line::from(format!(
@@ -265,8 +301,8 @@ fn render_lista_precos_tecido(frame: &mut Frame, area: Rect, app: &App) {
             format_optional_money(tecido.custo_base)
         )),
         Line::from(format!(
-            "Preco {}: R$ {}",
-            app.lista_precos_tipo.title(),
+            "{}: R$ {}",
+            app.lista_precos_tipo.value_label(),
             format_optional_money(current_price)
         )),
         Line::from(format!("Vinculos especificos: {overrides}")),
@@ -288,11 +324,6 @@ fn render_lista_precos_vinculos(frame: &mut Frame, area: Rect, app: &App) {
                 let effective = vinculo_lista_preco_efetivo(vinculo, app.lista_precos_tipo);
                 let base = vinculo_lista_preco_base(vinculo, app.lista_precos_tipo);
                 let override_price = vinculo_lista_preco_override(vinculo, app.lista_precos_tipo);
-                let origin = if override_price.is_some() {
-                    "especifico"
-                } else {
-                    "base"
-                };
                 let value = if app.editing_lista_preco_vinculo
                     && index == app.lista_precos_vinculo_option
                 {
@@ -304,18 +335,19 @@ fn render_lista_precos_vinculos(frame: &mut Frame, area: Rect, app: &App) {
                 } else {
                     format_optional_money(effective)
                 };
-                ListItem::new(format!(
-                    "{}. {} | R$ {} | {} | base R$ {}",
-                    index + 1,
-                    vinculo.cor_nome,
-                    value,
-                    origin,
-                    format_optional_money(base)
-                ))
+                let details = if app.editing_lista_preco_vinculo
+                    && index == app.lista_precos_vinculo_option
+                {
+                    format!("editando R$ {value}")
+                } else {
+                    format_vinculo_lista_valor(effective, base, override_price)
+                };
+                ListItem::new(format!("{}. {} | {}", index + 1, vinculo.cor_nome, details))
             })
             .collect()
     };
-    let mut state = ListState::default().with_selected(Some(app.lista_precos_vinculo_option));
+    let mut state =
+        list_state_with_lookahead(Some(app.lista_precos_vinculo_option), items.len(), area);
     let list = List::new(items)
         .block(
             Block::default()
@@ -338,8 +370,9 @@ fn render_cores(
     delta_e_threshold: f64,
 ) {
     let conflicts = closest_color_conflicts(cores, delta_e_threshold);
-    let items = std::iter::once(ListItem::new("1. [Cadastrar Cor]")).chain(
-        cores.iter().enumerate().map(|(index, cor)| {
+    let items = std::iter::once(ListItem::new("1. [Cadastrar Cor]"))
+        .chain(std::iter::once(ListItem::new("")))
+        .chain(cores.iter().enumerate().map(|(index, cor)| {
             let hex = cor.codigo_hex.as_deref().unwrap_or("#");
             let sku = cor.sku.as_deref().unwrap_or("____-__");
             let conflict = conflicts.get(index).and_then(Option::as_ref);
@@ -358,9 +391,9 @@ fn render_cores(
                 ));
             }
             ListItem::new(Line::from(spans))
-        }),
-    );
-    let mut state = ListState::default().with_selected(Some(selected));
+        }));
+    let item_count = cores.len() + 1;
+    let mut state = list_state_with_action_separators(Some(selected), item_count, area, &[1]);
     let list = List::new(items)
         .block(
             Block::default()
@@ -379,13 +412,14 @@ fn render_cores(
 }
 
 fn render_estampas(frame: &mut Frame, area: Rect, selected: usize, estampas: &[EstampaRecord]) {
-    let items = std::iter::once(ListItem::new("1. [Cadastrar Estampa]")).chain(
-        estampas.iter().enumerate().map(|(index, estampa)| {
+    let items = std::iter::once(ListItem::new("1. [Cadastrar Estampa]"))
+        .chain(std::iter::once(ListItem::new("")))
+        .chain(estampas.iter().enumerate().map(|(index, estampa)| {
             let sku = estampa.sku.as_deref().unwrap_or("____-__");
             ListItem::new(format!("{}. {} - {}", index + 2, sku, estampa.nome))
-        }),
-    );
-    let mut state = ListState::default().with_selected(Some(selected));
+        }));
+    let item_count = estampas.len() + 1;
+    let mut state = list_state_with_action_separators(Some(selected), item_count, area, &[1]);
     let list = List::new(items)
         .block(
             Block::default()
@@ -408,7 +442,7 @@ fn render_vinculos_menu(frame: &mut Frame, area: Rect, selected: usize) {
         .iter()
         .enumerate()
         .map(|(index, item)| ListItem::new(format!("{}. {}", index + 1, item)));
-    let mut state = ListState::default().with_selected(Some(selected));
+    let mut state = list_state_with_lookahead(Some(selected), 2, area);
     let list = List::new(items)
         .block(
             Block::default()
@@ -431,7 +465,7 @@ fn render_vinculo_tecidos(
         .iter()
         .enumerate()
         .map(|(index, tecido)| ListItem::new(format!("{}. {}", index + 1, tecido.nome)));
-    let mut state = ListState::default().with_selected(Some(selected));
+    let mut state = list_state_with_lookahead(Some(selected), tecidos.len(), area);
     let list = List::new(items)
         .block(Block::default().title(title).borders(Borders::ALL))
         .highlight_symbol("> ")
@@ -486,9 +520,12 @@ fn render_vinculo_cores(
             }
         }
     }
+    let action_start = items.len();
+    items.push(ListItem::new(""));
     items.push(ListItem::new("[Confirmar]"));
     items.push(ListItem::new("[Voltar]"));
-    let mut state = ListState::default().with_selected(Some(selected));
+    let mut state =
+        list_state_with_action_separators(Some(selected), items.len() - 1, area, &[action_start]);
     let list = List::new(items)
         .block(Block::default().title(title).borders(Borders::ALL))
         .highlight_symbol("> ")
@@ -518,8 +555,8 @@ fn render_vinculos_lista(
             Span::raw(format!(" {}", vinculo.cor_nome)),
         ]))
     });
-    let mut state =
-        ListState::default().with_selected(Some(selected.min(vinculos.len().saturating_sub(1))));
+    let selected = selected.min(vinculos.len().saturating_sub(1));
+    let mut state = list_state_with_lookahead(Some(selected), vinculos.len(), area);
     let list = List::new(items)
         .block(
             Block::default()
@@ -542,12 +579,7 @@ fn render_vinculo_detalhe(frame: &mut Frame, area: Rect, app: &App) {
 
     let slot_items = VinculoDetalheOption::ALL.iter().map(|option| match option {
         VinculoDetalheOption::Slot(slot) => {
-            let has_image = match slot {
-                VinculoImageSlot::Original => app.vinculo_images.imagem_original.is_some(),
-                VinculoImageSlot::Brand => app.vinculo_images.imagem_brand.is_some(),
-                VinculoImageSlot::Modelo => app.vinculo_images.imagem_modelo.is_some(),
-                VinculoImageSlot::Alternativa => app.vinculo_images.imagem_alternativa.is_some(),
-            };
+            let has_image = App::vinculo_has_slot(vinculo, *slot);
             let marker = if has_image { "[+]" } else { "[ ]" };
             ListItem::new(format!("{} {marker} {}", slot.index() + 1, slot.title()))
         }
@@ -575,7 +607,11 @@ fn render_vinculo_detalhe(frame: &mut Frame, area: Rect, app: &App) {
         VinculoDetalheOption::Desfazer => ListItem::new("[Desfazer Vinculo]"),
     });
     let current_count = app.vinculo_current_image_count();
-    let mut state = ListState::default().with_selected(Some(app.vinculo_detalhe_option.index()));
+    let mut state = list_state_with_lookahead(
+        Some(app.vinculo_detalhe_option.index()),
+        VinculoDetalheOption::ALL.len(),
+        chunks[0],
+    );
     let detail = List::new(slot_items)
         .block(
             Block::default()
@@ -616,12 +652,7 @@ fn render_vinculo_detalhe(frame: &mut Frame, area: Rect, app: &App) {
     } else if let Some(protocol) = &app.vinculo_thumbnail {
         frame.render_widget(TuiImage::new(protocol).allow_clipping(true), inner);
     } else {
-        let has_selected_image = match app.vinculo_image_slot {
-            VinculoImageSlot::Original => app.vinculo_images.imagem_original.is_some(),
-            VinculoImageSlot::Brand => app.vinculo_images.imagem_brand.is_some(),
-            VinculoImageSlot::Modelo => app.vinculo_images.imagem_modelo.is_some(),
-            VinculoImageSlot::Alternativa => app.vinculo_images.imagem_alternativa.is_some(),
-        };
+        let has_selected_image = app.vinculo_record_has_slot(app.vinculo_image_slot);
         let text = if has_selected_image {
             "Imagem salva, mas sem preview neste terminal."
         } else {
@@ -665,6 +696,7 @@ fn format_optional_money(value: Option<f64>) -> String {
 
 fn tecido_lista_preco(tecido: &TecidoRecord, tipo: ListaPrecoTipo) -> Option<f64> {
     match tipo {
+        ListaPrecoTipo::Custo => tecido.custo_base,
         ListaPrecoTipo::Atacado => tecido.preco_atacado,
         ListaPrecoTipo::Varejo => tecido.preco_varejo,
     }
@@ -672,13 +704,49 @@ fn tecido_lista_preco(tecido: &TecidoRecord, tipo: ListaPrecoTipo) -> Option<f64
 
 fn tecido_lista_override_count(tecido: &TecidoRecord, tipo: ListaPrecoTipo) -> i64 {
     match tipo {
+        ListaPrecoTipo::Custo => tecido.custo_override_count,
         ListaPrecoTipo::Atacado => tecido.preco_atacado_override_count,
         ListaPrecoTipo::Varejo => tecido.preco_varejo_override_count,
     }
 }
 
+fn tecido_lista_override_summary(tecido: &TecidoRecord, tipo: ListaPrecoTipo) -> String {
+    let (count, min, max) = match tipo {
+        ListaPrecoTipo::Custo => (
+            tecido.custo_override_count,
+            tecido.custo_override_min,
+            tecido.custo_override_max,
+        ),
+        ListaPrecoTipo::Atacado => (
+            tecido.preco_atacado_override_count,
+            tecido.preco_atacado_override_min,
+            tecido.preco_atacado_override_max,
+        ),
+        ListaPrecoTipo::Varejo => (
+            tecido.preco_varejo_override_count,
+            tecido.preco_varejo_override_min,
+            tecido.preco_varejo_override_max,
+        ),
+    };
+    if count == 0 {
+        return String::from("sem excecoes");
+    }
+    match (min, max) {
+        (Some(min), Some(max)) if (min - max).abs() < 0.005 => {
+            format!("{count} excecoes | R$ {}", format_optional_money(Some(min)))
+        }
+        (Some(min), Some(max)) => format!(
+            "{count} excecoes | menor R$ {} | maior R$ {}",
+            format_optional_money(Some(min)),
+            format_optional_money(Some(max))
+        ),
+        _ => format!("{count} excecoes"),
+    }
+}
+
 fn vinculo_lista_preco_override(vinculo: &VinculoRecord, tipo: ListaPrecoTipo) -> Option<f64> {
     match tipo {
+        ListaPrecoTipo::Custo => vinculo.custo_override,
         ListaPrecoTipo::Atacado => vinculo.preco_atacado_override,
         ListaPrecoTipo::Varejo => vinculo.preco_varejo_override,
     }
@@ -686,6 +754,7 @@ fn vinculo_lista_preco_override(vinculo: &VinculoRecord, tipo: ListaPrecoTipo) -
 
 fn vinculo_lista_preco_base(vinculo: &VinculoRecord, tipo: ListaPrecoTipo) -> Option<f64> {
     match tipo {
+        ListaPrecoTipo::Custo => vinculo.tecido_custo_base,
         ListaPrecoTipo::Atacado => vinculo.tecido_preco_atacado,
         ListaPrecoTipo::Varejo => vinculo.tecido_preco_varejo,
     }
@@ -693,7 +762,28 @@ fn vinculo_lista_preco_base(vinculo: &VinculoRecord, tipo: ListaPrecoTipo) -> Op
 
 fn vinculo_lista_preco_efetivo(vinculo: &VinculoRecord, tipo: ListaPrecoTipo) -> Option<f64> {
     match tipo {
+        ListaPrecoTipo::Custo => vinculo.custo_efetivo,
         ListaPrecoTipo::Atacado => vinculo.preco_atacado_efetivo,
         ListaPrecoTipo::Varejo => vinculo.preco_varejo_efetivo,
+    }
+}
+
+fn format_vinculo_lista_valor(
+    effective: Option<f64>,
+    base: Option<f64>,
+    override_value: Option<f64>,
+) -> String {
+    match (effective, base, override_value) {
+        (Some(value), Some(base), Some(_)) => format!(
+            "especifico R$ {} | base R$ {}",
+            format_optional_money(Some(value)),
+            format_optional_money(Some(base))
+        ),
+        (Some(value), None, Some(_)) => format!(
+            "especifico R$ {} | base nao definida",
+            format_optional_money(Some(value))
+        ),
+        (Some(value), _, None) => format!("base R$ {}", format_optional_money(Some(value))),
+        (None, _, _) => String::from("sem valor"),
     }
 }

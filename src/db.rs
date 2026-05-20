@@ -256,8 +256,15 @@ pub struct TecidoRecord {
     pub custo_base: Option<f64>,
     pub preco_atacado: Option<f64>,
     pub preco_varejo: Option<f64>,
+    pub custo_override_count: i64,
     pub preco_atacado_override_count: i64,
     pub preco_varejo_override_count: i64,
+    pub custo_override_min: Option<f64>,
+    pub custo_override_max: Option<f64>,
+    pub preco_atacado_override_min: Option<f64>,
+    pub preco_atacado_override_max: Option<f64>,
+    pub preco_varejo_override_min: Option<f64>,
+    pub preco_varejo_override_max: Option<f64>,
     pub rendimento_m_kg: Option<f64>,
     pub gramatura_linear_g_m: Option<i32>,
     pub gramatura_g_m2: Option<i32>,
@@ -325,19 +332,23 @@ pub async fn list_tecidos(pool: &PgPool) -> Result<Vec<TecidoRecord>, sqlx::Erro
             preco_atacado::float8 AS preco_atacado,
             preco_varejo::float8 AS preco_varejo,
             (
-                SELECT COUNT(*) FROM tecido_cores tc
-                WHERE tc.tecido_id = tecidos.id AND tc.ativo = TRUE AND tc.preco_atacado_override IS NOT NULL
-            ) + (
-                SELECT COUNT(*) FROM tecido_estampas te
-                WHERE te.tecido_id = tecidos.id AND te.ativo = TRUE AND te.preco_atacado_override IS NOT NULL
+                COALESCE(tc_counts.custo_override_count, 0)
+                + COALESCE(te_counts.custo_override_count, 0)
+            ) AS custo_override_count,
+            (
+                COALESCE(tc_counts.preco_atacado_override_count, 0)
+                + COALESCE(te_counts.preco_atacado_override_count, 0)
             ) AS preco_atacado_override_count,
             (
-                SELECT COUNT(*) FROM tecido_cores tc
-                WHERE tc.tecido_id = tecidos.id AND tc.ativo = TRUE AND tc.preco_varejo_override IS NOT NULL
-            ) + (
-                SELECT COUNT(*) FROM tecido_estampas te
-                WHERE te.tecido_id = tecidos.id AND te.ativo = TRUE AND te.preco_varejo_override IS NOT NULL
+                COALESCE(tc_counts.preco_varejo_override_count, 0)
+                + COALESCE(te_counts.preco_varejo_override_count, 0)
             ) AS preco_varejo_override_count,
+            LEAST(tc_counts.custo_override_min, te_counts.custo_override_min)::float8 AS custo_override_min,
+            GREATEST(tc_counts.custo_override_max, te_counts.custo_override_max)::float8 AS custo_override_max,
+            LEAST(tc_counts.preco_atacado_override_min, te_counts.preco_atacado_override_min)::float8 AS preco_atacado_override_min,
+            GREATEST(tc_counts.preco_atacado_override_max, te_counts.preco_atacado_override_max)::float8 AS preco_atacado_override_max,
+            LEAST(tc_counts.preco_varejo_override_min, te_counts.preco_varejo_override_min)::float8 AS preco_varejo_override_min,
+            GREATEST(tc_counts.preco_varejo_override_max, te_counts.preco_varejo_override_max)::float8 AS preco_varejo_override_max,
             rendimento_m_kg::float8 AS rendimento_m_kg,
             gramatura_linear_g_m,
             gramatura_g_m2,
@@ -346,6 +357,38 @@ pub async fn list_tecidos(pool: &PgPool) -> Result<Vec<TecidoRecord>, sqlx::Erro
             elasticidade,
             acabamento
         FROM tecidos
+        LEFT JOIN (
+            SELECT
+                tecido_id,
+                COUNT(*) FILTER (WHERE custo_override IS NOT NULL) AS custo_override_count,
+                COUNT(*) FILTER (WHERE preco_atacado_override IS NOT NULL) AS preco_atacado_override_count,
+                COUNT(*) FILTER (WHERE preco_varejo_override IS NOT NULL) AS preco_varejo_override_count,
+                MIN(custo_override) AS custo_override_min,
+                MAX(custo_override) AS custo_override_max,
+                MIN(preco_atacado_override) AS preco_atacado_override_min,
+                MAX(preco_atacado_override) AS preco_atacado_override_max,
+                MIN(preco_varejo_override) AS preco_varejo_override_min,
+                MAX(preco_varejo_override) AS preco_varejo_override_max
+            FROM tecido_cores
+            WHERE ativo = TRUE
+            GROUP BY tecido_id
+        ) tc_counts ON tc_counts.tecido_id = tecidos.id
+        LEFT JOIN (
+            SELECT
+                tecido_id,
+                COUNT(*) FILTER (WHERE custo_override IS NOT NULL) AS custo_override_count,
+                COUNT(*) FILTER (WHERE preco_atacado_override IS NOT NULL) AS preco_atacado_override_count,
+                COUNT(*) FILTER (WHERE preco_varejo_override IS NOT NULL) AS preco_varejo_override_count,
+                MIN(custo_override) AS custo_override_min,
+                MAX(custo_override) AS custo_override_max,
+                MIN(preco_atacado_override) AS preco_atacado_override_min,
+                MAX(preco_atacado_override) AS preco_atacado_override_max,
+                MIN(preco_varejo_override) AS preco_varejo_override_min,
+                MAX(preco_varejo_override) AS preco_varejo_override_max
+            FROM tecido_estampas
+            WHERE ativo = TRUE
+            GROUP BY tecido_id
+        ) te_counts ON te_counts.tecido_id = tecidos.id
         ORDER BY nome, id
         "#,
     )
@@ -363,8 +406,15 @@ pub async fn list_tecidos(pool: &PgPool) -> Result<Vec<TecidoRecord>, sqlx::Erro
             custo_base: row.get("custo_base"),
             preco_atacado: row.get("preco_atacado"),
             preco_varejo: row.get("preco_varejo"),
+            custo_override_count: row.get("custo_override_count"),
             preco_atacado_override_count: row.get("preco_atacado_override_count"),
             preco_varejo_override_count: row.get("preco_varejo_override_count"),
+            custo_override_min: row.get("custo_override_min"),
+            custo_override_max: row.get("custo_override_max"),
+            preco_atacado_override_min: row.get("preco_atacado_override_min"),
+            preco_atacado_override_max: row.get("preco_atacado_override_max"),
+            preco_varejo_override_min: row.get("preco_varejo_override_min"),
+            preco_varejo_override_max: row.get("preco_varejo_override_max"),
             rendimento_m_kg: row.get("rendimento_m_kg"),
             gramatura_linear_g_m: row.get("gramatura_linear_g_m"),
             gramatura_g_m2: row.get("gramatura_g_m2"),
@@ -712,38 +762,35 @@ pub async fn list_estampa_vinculos_by_tecido(
         .collect())
 }
 
-pub async fn get_vinculo_images(
+pub async fn get_vinculo_image(
     pool: &PgPool,
     tecido_id: i64,
     item_id: i64,
     usa_estampas: bool,
-) -> Result<VinculoImages, sqlx::Error> {
+    slot: &str,
+) -> Result<Option<Vec<u8>>, sqlx::Error> {
     let table = if usa_estampas {
         "tecido_estampas"
     } else {
         "tecido_cores"
     };
     let item_column = if usa_estampas { "estampa_id" } else { "cor_id" };
+    let column = match slot {
+        "original" => "imagem_original",
+        "brand" => "imagem_brand",
+        "modelo" => "imagem_modelo",
+        "alternativa" => "imagem_alternativa",
+        _ => "imagem_original",
+    };
     let row = sqlx::query(&format!(
-        r#"
-        SELECT imagem_original, imagem_brand, imagem_modelo, imagem_alternativa
-        FROM {table}
-        WHERE tecido_id = $1 AND {item_column} = $2
-        "#
+        "SELECT {column} AS image FROM {table} WHERE tecido_id = $1 AND {item_column} = $2"
     ))
     .bind(tecido_id)
     .bind(item_id)
     .fetch_optional(pool)
     .await?;
 
-    Ok(row
-        .map(|row| VinculoImages {
-            imagem_original: row.get("imagem_original"),
-            imagem_brand: row.get("imagem_brand"),
-            imagem_modelo: row.get("imagem_modelo"),
-            imagem_alternativa: row.get("imagem_alternativa"),
-        })
-        .unwrap_or_default())
+    Ok(row.and_then(|row| row.get("image")))
 }
 
 pub async fn update_vinculo_image(
@@ -812,6 +859,7 @@ pub async fn update_tecido_preco_venda(
     preco: Option<f64>,
 ) -> Result<(), sqlx::Error> {
     let column = match tipo {
+        ListaPrecoTipo::Custo => "custo_base",
         ListaPrecoTipo::Atacado => "preco_atacado",
         ListaPrecoTipo::Varejo => "preco_varejo",
     };
@@ -842,6 +890,7 @@ pub async fn update_vinculo_preco_override(
     };
     let item_column = if usa_estampas { "estampa_id" } else { "cor_id" };
     let price_column = match tipo {
+        ListaPrecoTipo::Custo => "custo_override",
         ListaPrecoTipo::Atacado => "preco_atacado_override",
         ListaPrecoTipo::Varejo => "preco_varejo_override",
     };

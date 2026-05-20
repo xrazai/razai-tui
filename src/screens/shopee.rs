@@ -3,13 +3,13 @@ use ratatui::{
     layout::{Constraint, Direction, Layout, Rect},
     style::{Color, Style},
     text::{Line, Span, Text},
-    widgets::{Block, Borders, List, ListItem, ListState, Paragraph, Wrap},
+    widgets::{Block, Borders, List, ListItem, Paragraph, Wrap},
 };
 
 use crate::{
     db::TecidoRecord,
     shopee::{ShopeeListingUpdatePlan, ShopeeStockParentGroup},
-    ui::selected_style,
+    ui::{list_state_with_lookahead, selected_style},
 };
 
 #[allow(clippy::too_many_arguments)]
@@ -65,7 +65,7 @@ pub fn render(
         .iter()
         .enumerate()
         .map(|(index, item)| ListItem::new(format!("{}. {}", index + 1, item)));
-        let mut state = ListState::default().with_selected(Some(selected));
+        let mut state = list_state_with_lookahead(Some(selected), 4, chunks[0]);
         let list = List::new(items)
             .block(Block::default().title("Shopee").borders(Borders::ALL))
             .highlight_symbol("> ")
@@ -232,7 +232,9 @@ fn render_update_form(
 
 fn update_scroll_offset(area: Rect, selected_row: usize, extra_bottom_rows: usize) -> usize {
     let visible_rows = area.height.saturating_sub(2).max(1) as usize;
+    let lookahead = visible_rows.min(4);
     selected_row
+        .saturating_add(lookahead)
         .saturating_add(1 + extra_bottom_rows)
         .saturating_sub(visible_rows)
 }
@@ -309,7 +311,9 @@ fn render_stock_groups(
         }
     }
     let visible_rows = area.height.saturating_sub(2).max(1) as usize;
+    let lookahead = visible_rows.min(4);
     let scroll_offset = selected_row
+        .saturating_add(lookahead)
         .saturating_add(1)
         .saturating_sub(visible_rows)
         .min(rows.len().saturating_sub(visible_rows));

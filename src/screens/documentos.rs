@@ -3,10 +3,13 @@ use ratatui::{
     layout::{Constraint, Direction, Layout, Rect},
     style::{Color, Style},
     text::{Line, Span},
-    widgets::{Block, Borders, List, ListItem, ListState, Paragraph, Wrap},
+    widgets::{Block, Borders, List, ListItem, Paragraph, Wrap},
 };
 
-use crate::{app::App, ui::selected_style};
+use crate::{
+    app::App,
+    ui::{list_state_with_action_separators, list_state_with_lookahead, selected_style},
+};
 
 pub fn render(frame: &mut Frame, area: Rect, app: &App) {
     let chunks = Layout::default()
@@ -21,7 +24,7 @@ pub fn render(frame: &mut Frame, area: Rect, app: &App) {
             .iter()
             .enumerate()
             .map(|(index, item)| ListItem::new(format!("{}. {}", index + 1, item)));
-        let mut state = ListState::default().with_selected(Some(app.documentos_option));
+        let mut state = list_state_with_lookahead(Some(app.documentos_option), 1, chunks[0]);
         let list = List::new(items)
             .block(Block::default().title("Documentos").borders(Borders::ALL))
             .highlight_symbol("> ")
@@ -64,9 +67,16 @@ fn render_checklist(frame: &mut Frame, area: Rect, app: &App) {
         })
         .collect::<Vec<_>>();
 
+    let action_start = items.len();
+    items.push(ListItem::new(""));
     items.push(ListItem::new("[Gerar PDF]"));
     items.push(ListItem::new("[Voltar]"));
-    let mut state = ListState::default().with_selected(Some(app.checklist_cursor));
+    let mut state = list_state_with_action_separators(
+        Some(app.checklist_cursor),
+        items.len() - 1,
+        area,
+        &[action_start],
+    );
     let list = List::new(items)
         .block(
             Block::default()

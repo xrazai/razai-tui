@@ -64,7 +64,11 @@ pub fn active_context(
         },
         (Section::Dados, DadosScreen::ListaPrecosMenu, _, _) => AgentContext {
             capability: "dados.lista_precos.menu",
-            description: "Ajuda a escolher entre lista de precos de atacado ou varejo.",
+            description: "Ajuda a escolher entre custo base, atacado ou varejo.",
+        },
+        (Section::Dados, DadosScreen::ListaPrecosCusto, _, _) => AgentContext {
+            capability: "dados.lista_precos.custo",
+            description: "Ajuda a consultar custo base e excecoes por vinculo.",
         },
         (Section::Dados, DadosScreen::ListaPrecosAtacado, _, _) => AgentContext {
             capability: "dados.lista_precos.atacado",
@@ -76,11 +80,11 @@ pub fn active_context(
         },
         (Section::Dados, DadosScreen::ListaPrecosTecido, _, _) => AgentContext {
             capability: "dados.lista_precos.tecido",
-            description: "Ajuda a editar o preco de venda base do tecido na lista selecionada.",
+            description: "Ajuda a editar o valor base do tecido na lista selecionada.",
         },
         (Section::Dados, DadosScreen::ListaPrecosVinculos, _, _) => AgentContext {
             capability: "dados.lista_precos.vinculos",
-            description: "Ajuda a editar precos especificos de vinculos para atacado ou varejo.",
+            description: "Ajuda a editar excecoes especificas de vinculos para custo, atacado ou varejo.",
         },
         (Section::Dados, DadosScreen::Menu, DadosOption::Tecido, _) => AgentContext {
             capability: "dados.tecidos",
@@ -151,11 +155,10 @@ pub fn active_context(
 
 pub fn screen_context(form: &TecidoForm) -> String {
     format!(
-        "Formulario tecido: nome='{}', composicao='{}', largura='{}', custo_base='{}', rendimento='{}', gramatura_linear='{}', gramatura_m2='{}'.",
+        "Formulario tecido: nome='{}', composicao='{}', largura='{}', rendimento='{}', gramatura_linear='{}', gramatura_m2='{}'. Custo base fica em Dados > Lista de Precos > Custo Base.",
         form.nome,
         form.composicao,
         form.largura,
-        form.custo_base,
         form.rendimento,
         form.gramatura_linear,
         form.gramatura_m2

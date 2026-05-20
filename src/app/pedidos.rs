@@ -1,6 +1,7 @@
 use std::{
     fs::{self, OpenOptions},
     io::Write,
+    panic,
     path::{Path, PathBuf},
     process::Command,
 };
@@ -542,7 +543,10 @@ impl App {
     fn gerar_pdf_pedido(&self, pedido_id: i64) -> Result<PathBuf, String> {
         let dir = pedidos_pdf_dir()?;
         let path = dir.join(format!("razai_pedido_{pedido_id}.pdf"));
-        pdf::write_pedido_pdf(&path, pedido_id, &self.pedido_itens)?;
+        let itens = self.pedido_itens.clone();
+        panic::catch_unwind(|| pdf::write_pedido_pdf(&path, pedido_id, &itens)).map_err(
+            |_| String::from("falha interna ao gerar PDF do pedido; revise textos dos itens"),
+        )??;
         Ok(path)
     }
 

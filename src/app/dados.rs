@@ -152,12 +152,15 @@ impl App {
             DadosScreen::VinculosSelecionarCores | DadosScreen::VinculosLista => {
                 self.dados_screen = DadosScreen::VinculosMenu;
             }
-            DadosScreen::ListaPrecosAtacado | DadosScreen::ListaPrecosVarejo => {
+            DadosScreen::ListaPrecosCusto
+            | DadosScreen::ListaPrecosAtacado
+            | DadosScreen::ListaPrecosVarejo => {
                 self.dados_screen = DadosScreen::ListaPrecosMenu;
             }
             DadosScreen::ListaPrecosTecido => {
                 self.editing_lista_preco_tecido = false;
                 self.dados_screen = match self.lista_precos_tipo {
+                    ListaPrecoTipo::Custo => DadosScreen::ListaPrecosCusto,
                     ListaPrecoTipo::Atacado => DadosScreen::ListaPrecosAtacado,
                     ListaPrecoTipo::Varejo => DadosScreen::ListaPrecosVarejo,
                 };
@@ -537,7 +540,7 @@ impl App {
         self.vinculo_detalhe_option = VinculoDetalheOption::Slot(VinculoImageSlot::Original);
         self.vinculo_image_slot = VinculoImageSlot::Original;
         self.refresh_vinculo_custo_input();
-        self.load_vinculo_images();
+        self.load_vinculo_image_slot();
         self.dados_screen = DadosScreen::VinculoDetalhe;
     }
 
@@ -546,11 +549,11 @@ impl App {
             return;
         }
         self.lista_precos_tecido_detail_option = 0;
-        self.editing_lista_preco_tecido = true;
+        self.editing_lista_preco_tecido = false;
         self.refresh_lista_precos_tecido_input();
         self.db_status = format!(
-            "Editando preco {} do tecido. Enter salva.",
-            self.lista_precos_tipo.title()
+            "Enter edita {} do tecido; Down acessa vinculos/excecoes.",
+            self.lista_precos_tipo.value_label()
         );
         self.dados_screen = DadosScreen::ListaPrecosTecido;
     }
@@ -589,12 +592,12 @@ impl App {
             KeyCode::Esc if self.editing_lista_preco_tecido => {
                 self.editing_lista_preco_tecido = false;
                 self.refresh_lista_precos_tecido_input();
-                self.db_status = String::from("Edicao de preco do tecido cancelada.");
+                self.db_status = String::from("Edicao do valor do tecido cancelada.");
             }
             KeyCode::Esc if self.editing_lista_preco_vinculo => {
                 self.editing_lista_preco_vinculo = false;
                 self.refresh_lista_precos_vinculo_input();
-                self.db_status = String::from("Edicao de preco especifico cancelada.");
+                self.db_status = String::from("Edicao do valor especifico cancelada.");
             }
             KeyCode::Backspace if self.editing_lista_preco_tecido => {
                 self.lista_precos_tecido_input.pop();
@@ -637,7 +640,7 @@ impl App {
         self.lista_precos_tecido_input = self
             .tecidos
             .get(self.lista_precos_tecido_option)
-            .and_then(|tecido| tecido_preco_venda(tecido, self.lista_precos_tipo))
+            .and_then(|tecido| tecido_lista_valor(tecido, self.lista_precos_tipo))
             .map(|value| format!("{value:.2}"))
             .unwrap_or_default();
     }
@@ -646,7 +649,7 @@ impl App {
         self.lista_precos_vinculo_input = self
             .vinculos
             .get(self.lista_precos_vinculo_option)
-            .and_then(|vinculo| vinculo_preco_override(vinculo, self.lista_precos_tipo))
+            .and_then(|vinculo| vinculo_lista_override(vinculo, self.lista_precos_tipo))
             .map(|value| format!("{value:.2}"))
             .unwrap_or_default();
     }
@@ -658,16 +661,16 @@ impl App {
         };
         let Some(pool) = &self.db_pool else {
             self.editing_lista_preco_tecido = false;
-            self.db_status = String::from("Banco local indisponivel para salvar preco do tecido.");
+            self.db_status = String::from("Banco local indisponivel para salvar valor do tecido.");
             return;
         };
-        let preco = if self.lista_precos_tecido_input.trim().is_empty() {
+        let valor = if self.lista_precos_tecido_input.trim().is_empty() {
             None
         } else {
             match parse_number(&self.lista_precos_tecido_input).filter(|value| *value >= 0.0) {
                 Some(value) => Some(value),
                 None => {
-                    self.db_status = String::from("Preco do tecido invalido.");
+                    self.db_status = String::from("Valor do tecido invalido.");
                     return;
                 }
             }
@@ -677,16 +680,16 @@ impl App {
             pool,
             tecido.id,
             self.lista_precos_tipo,
-            preco,
+            valor,
         )) {
             Ok(()) => {
                 self.editing_lista_preco_tecido = false;
                 self.reload_tecidos();
                 self.refresh_lista_precos_tecido_input();
                 self.db_status =
-                    format!("Preco {} do tecido salvo.", self.lista_precos_tipo.title());
+                    format!("{} do tecido salvo.", self.lista_precos_tipo.value_label());
             }
-            Err(error) => self.db_status = format!("Erro ao salvar preco do tecido: {error}"),
+            Err(error) => self.db_status = format!("Erro ao salvar valor do tecido: {error}"),
         }
     }
 
@@ -701,19 +704,19 @@ impl App {
         };
         let Some(pool) = &self.db_pool else {
             self.editing_lista_preco_vinculo = false;
-            self.db_status = String::from("Banco local indisponivel para salvar preco especifico.");
+            self.db_status = String::from("Banco local indisponivel para salvar valor especifico.");
             return;
         };
 
-        let base = tecido_preco_venda(tecido, self.lista_precos_tipo);
-        let preco_override = if self.lista_precos_vinculo_input.trim().is_empty() {
+        let base = tecido_lista_valor(tecido, self.lista_precos_tipo);
+        let valor_override = if self.lista_precos_vinculo_input.trim().is_empty() {
             None
         } else {
             match parse_number(&self.lista_precos_vinculo_input).filter(|value| *value >= 0.0) {
                 Some(value) if money_matches(value, base) => None,
                 Some(value) => Some(value),
                 None => {
-                    self.db_status = String::from("Preco especifico invalido.");
+                    self.db_status = String::from("Valor especifico invalido.");
                     return;
                 }
             }
@@ -726,22 +729,22 @@ impl App {
             vinculo.cor_id,
             usa_estampas,
             self.lista_precos_tipo,
-            preco_override,
+            valor_override,
         )) {
             Ok(()) => {
                 self.editing_lista_preco_vinculo = false;
                 self.load_vinculos(tecido.id);
                 self.refresh_lista_precos_vinculo_input();
-                self.db_status = if preco_override.is_some() {
-                    format!("Preco {} especifico salvo.", self.lista_precos_tipo.title())
+                self.db_status = if valor_override.is_some() {
+                    format!("{} especifico salvo.", self.lista_precos_tipo.value_label())
                 } else {
                     format!(
-                        "Preco {} especifico removido; usando preco do tecido.",
-                        self.lista_precos_tipo.title()
+                        "{} especifico removido; usando valor do tecido.",
+                        self.lista_precos_tipo.value_label()
                     )
                 };
             }
-            Err(error) => self.db_status = format!("Erro ao salvar preco especifico: {error}"),
+            Err(error) => self.db_status = format!("Erro ao salvar valor especifico: {error}"),
         }
     }
 
@@ -803,7 +806,7 @@ impl App {
             self.editing_vinculo_custo = false;
             self.vinculo_detalhe_option = VinculoDetalheOption::Slot(slot);
             self.vinculo_image_slot = slot;
-            self.refresh_vinculo_thumbnail();
+            self.load_vinculo_image_slot();
         }
     }
 
@@ -813,7 +816,7 @@ impl App {
         self.vinculo_detalhe_option = self.vinculo_detalhe_option.next();
         if let Some(slot) = self.vinculo_detalhe_option.selected_slot() {
             self.vinculo_image_slot = slot;
-            self.refresh_vinculo_thumbnail();
+            self.load_vinculo_image_slot();
         }
     }
 
@@ -823,7 +826,7 @@ impl App {
         self.vinculo_detalhe_option = self.vinculo_detalhe_option.previous();
         if let Some(slot) = self.vinculo_detalhe_option.selected_slot() {
             self.vinculo_image_slot = slot;
-            self.refresh_vinculo_thumbnail();
+            self.load_vinculo_image_slot();
         }
     }
 
@@ -843,11 +846,11 @@ impl App {
         self.vinculo_detalhe_option = VinculoDetalheOption::Slot(VinculoImageSlot::Original);
         self.vinculo_image_slot = VinculoImageSlot::Original;
         self.refresh_vinculo_custo_input();
-        self.load_vinculo_images();
+        self.load_vinculo_image_slot();
         if let Some(slot) = self.first_empty_vinculo_image_slot() {
             self.vinculo_detalhe_option = VinculoDetalheOption::Slot(slot);
             self.vinculo_image_slot = slot;
-            self.refresh_vinculo_thumbnail();
+            self.load_vinculo_image_slot();
         }
     }
 
@@ -952,23 +955,32 @@ impl App {
         }
     }
 
-    fn load_vinculo_images(&mut self) {
+    fn load_vinculo_image_slot(&mut self) {
         let Some((tecido_id, item_id, usa_estampas)) = self.selected_vinculo_keys() else {
             return;
         };
         if let Some(pool) = &self.db_pool {
-            match self.db_runtime.block_on(db::get_vinculo_images(
+            match self.db_runtime.block_on(db::get_vinculo_image(
                 pool,
                 tecido_id,
                 item_id,
                 usa_estampas,
+                self.vinculo_image_slot.key(),
             )) {
-                Ok(images) => {
-                    self.vinculo_images = images;
+                Ok(image) => {
+                    self.vinculo_images = VinculoImages::default();
+                    match self.vinculo_image_slot {
+                        VinculoImageSlot::Original => self.vinculo_images.imagem_original = image,
+                        VinculoImageSlot::Brand => self.vinculo_images.imagem_brand = image,
+                        VinculoImageSlot::Modelo => self.vinculo_images.imagem_modelo = image,
+                        VinculoImageSlot::Alternativa => {
+                            self.vinculo_images.imagem_alternativa = image;
+                        }
+                    }
                     self.refresh_vinculo_thumbnail();
                 }
                 Err(error) => {
-                    self.db_status = format!("Erro ao carregar imagens do vinculo: {error}");
+                    self.db_status = format!("Erro ao carregar imagem do vinculo: {error}");
                 }
             }
         }
@@ -1037,7 +1049,7 @@ impl App {
                     upload.slot,
                 ));
                 self.load_vinculos(upload.tecido_id);
-                self.load_vinculo_images();
+                self.load_vinculo_image_slot();
                 self.advance_after_vinculo_image_upload();
                 self.db_status = format!("{} salva no vinculo.", upload.slot.title());
             }
@@ -1076,11 +1088,11 @@ impl App {
                 self.vinculo_detalhe_option =
                     VinculoDetalheOption::Slot(VinculoImageSlot::Original);
                 self.vinculo_image_slot = VinculoImageSlot::Original;
-                self.load_vinculo_images();
+                self.load_vinculo_image_slot();
                 if let Some(slot) = self.first_empty_vinculo_image_slot() {
                     self.vinculo_detalhe_option = VinculoDetalheOption::Slot(slot);
                     self.vinculo_image_slot = slot;
-                    self.refresh_vinculo_thumbnail();
+                    self.load_vinculo_image_slot();
                 }
                 return true;
             }
@@ -1123,7 +1135,7 @@ impl App {
                         VinculoDetalheOption::Slot(VinculoImageSlot::Original);
                     self.vinculo_image_slot = VinculoImageSlot::Original;
                     self.refresh_vinculo_custo_input();
-                    self.load_vinculo_images();
+                    self.load_vinculo_image_slot();
                 }
                 self.db_status = String::from("Vinculo desfeito para novos lancamentos.");
             }
@@ -1213,15 +1225,17 @@ fn money_matches(value: f64, base: Option<f64>) -> bool {
     (value * 100.0).round() as i64 == (base * 100.0).round() as i64
 }
 
-fn tecido_preco_venda(tecido: &TecidoRecord, tipo: ListaPrecoTipo) -> Option<f64> {
+fn tecido_lista_valor(tecido: &TecidoRecord, tipo: ListaPrecoTipo) -> Option<f64> {
     match tipo {
+        ListaPrecoTipo::Custo => tecido.custo_base,
         ListaPrecoTipo::Atacado => tecido.preco_atacado,
         ListaPrecoTipo::Varejo => tecido.preco_varejo,
     }
 }
 
-fn vinculo_preco_override(vinculo: &VinculoRecord, tipo: ListaPrecoTipo) -> Option<f64> {
+fn vinculo_lista_override(vinculo: &VinculoRecord, tipo: ListaPrecoTipo) -> Option<f64> {
     match tipo {
+        ListaPrecoTipo::Custo => vinculo.custo_override,
         ListaPrecoTipo::Atacado => vinculo.preco_atacado_override,
         ListaPrecoTipo::Varejo => vinculo.preco_varejo_override,
     }
@@ -1280,23 +1294,21 @@ impl App {
         VinculoImageSlot::ALL
             .iter()
             .copied()
-            .find(|slot| !self.vinculo_images_has_slot(*slot))
+            .find(|slot| !self.vinculo_record_has_slot(*slot))
     }
 
-    fn vinculo_images_has_slot(&self, slot: VinculoImageSlot) -> bool {
-        match slot {
-            VinculoImageSlot::Original => self.vinculo_images.imagem_original.is_some(),
-            VinculoImageSlot::Brand => self.vinculo_images.imagem_brand.is_some(),
-            VinculoImageSlot::Modelo => self.vinculo_images.imagem_modelo.is_some(),
-            VinculoImageSlot::Alternativa => self.vinculo_images.imagem_alternativa.is_some(),
-        }
+    pub fn vinculo_record_has_slot(&self, slot: VinculoImageSlot) -> bool {
+        let Some(vinculo) = self.vinculos.get(self.vinculo_lista_option) else {
+            return false;
+        };
+        Self::vinculo_has_slot(vinculo, slot)
     }
 
     pub fn vinculo_current_image_count(&self) -> usize {
-        VinculoImageSlot::ALL
-            .iter()
-            .filter(|slot| self.vinculo_images_has_slot(**slot))
-            .count()
+        self.vinculos
+            .get(self.vinculo_lista_option)
+            .map(Self::vinculo_record_image_count)
+            .unwrap_or(0)
     }
 
     pub fn vinculo_record_image_count(vinculo: &VinculoRecord) -> usize {
@@ -1309,6 +1321,15 @@ impl App {
         .into_iter()
         .filter(|has_image| *has_image)
         .count()
+    }
+
+    pub fn vinculo_has_slot(vinculo: &VinculoRecord, slot: VinculoImageSlot) -> bool {
+        match slot {
+            VinculoImageSlot::Original => vinculo.has_imagem_original,
+            VinculoImageSlot::Brand => vinculo.has_imagem_brand,
+            VinculoImageSlot::Modelo => vinculo.has_imagem_modelo,
+            VinculoImageSlot::Alternativa => vinculo.has_imagem_alternativa,
+        }
     }
 }
 

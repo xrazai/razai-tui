@@ -93,11 +93,11 @@ impl App {
     }
 
     pub(in crate::app) fn next_lista_precos_option(&mut self) {
-        self.lista_precos_option = (self.lista_precos_option + 1) % 2;
+        self.lista_precos_option = (self.lista_precos_option + 1) % 3;
     }
 
     pub(in crate::app) fn previous_lista_precos_option(&mut self) {
-        self.lista_precos_option = (self.lista_precos_option + 1) % 2;
+        self.lista_precos_option = (self.lista_precos_option + 2) % 3;
     }
 
     pub(in crate::app) fn next_lista_precos_tecido(&mut self) {

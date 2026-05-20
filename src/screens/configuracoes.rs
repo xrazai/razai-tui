@@ -3,10 +3,13 @@ use ratatui::{
     layout::Rect,
     style::{Color, Style},
     text::{Line, Span, Text},
-    widgets::{Block, Borders, List, ListItem, ListState},
+    widgets::{Block, Borders, List, ListItem},
 };
 
-use crate::{app::App, ui::selected_style};
+use crate::{
+    app::App,
+    ui::{list_state_with_lookahead, selected_style},
+};
 
 pub fn render(frame: &mut Frame, area: Rect, app: &App) {
     let mut items = app
@@ -38,7 +41,6 @@ pub fn render(frame: &mut Frame, area: Rect, app: &App) {
         ])));
     }
 
-    items.push(ListItem::new(Line::from("")));
     items.push(ListItem::new(Line::from(vec![
         Span::styled(
             if app.printer_option == app.printers.len() {
@@ -55,6 +57,7 @@ pub fn render(frame: &mut Frame, area: Rect, app: &App) {
         ),
         Span::raw("  bloqueia cores mais proximas que este valor"),
     ])));
+    items.push(ListItem::new(""));
     items.push(action_line(
         app.printer_option == app.printers.len() + 1,
         "[Confirmar]",
@@ -64,7 +67,11 @@ pub fn render(frame: &mut Frame, area: Rect, app: &App) {
         "[Voltar]",
     ));
 
-    let mut state = ListState::default().with_selected(Some(app.printer_option));
+    let empty_message_rows = usize::from(app.printers.is_empty());
+    let visual_selected = app.printer_option
+        + empty_message_rows
+        + usize::from(app.printer_option >= app.printers.len() + 1);
+    let mut state = list_state_with_lookahead(Some(visual_selected), items.len(), area);
     let list = List::new(items)
         .block(
             Block::default()
@@ -78,8 +85,9 @@ pub fn render(frame: &mut Frame, area: Rect, app: &App) {
 }
 
 fn action_line(selected: bool, label: &'static str) -> ListItem<'static> {
-    ListItem::new(Line::from(vec![
+    let line = Line::from(vec![
         Span::styled(if selected { "> " } else { "  " }, selected_style(selected)),
         Span::raw(label),
-    ]))
+    ]);
+    ListItem::new(line)
 }

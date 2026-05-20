@@ -46,6 +46,14 @@ struct VinculoImageUploadResult {
     result: Result<(), String>,
 }
 
+enum ShopeeTaskResult {
+    StockFetch(Result<Vec<shopee::ShopeeStockParentGroup>, String>),
+    StockSync(String),
+    CreateListing(String),
+    PreviewUpdates(Result<(Vec<shopee::ShopeeListingUpdatePlan>, String, bool), String>),
+    ApplyUpdates(String),
+}
+
 #[derive(Clone, Copy)]
 enum ShopeeStockCursorTarget {
     Parent(usize),
@@ -159,10 +167,14 @@ pub struct App {
     pub shopee_update_confirm: bool,
     pub shopee_update_plans: Vec<shopee::ShopeeListingUpdatePlan>,
     pub shopee_status: String,
+    pub shopee_task_started: Option<Instant>,
+    shopee_task_rx: Option<Receiver<ShopeeTaskResult>>,
     pub documentos_option: usize,
     pub checklist_active: bool,
     pub checklist_cursor: usize,
     pub checklist_selected_tecidos: Vec<i64>,
+    pub checklist_pdf_started: Option<Instant>,
+    checklist_pdf_rx: Option<Receiver<String>>,
     pub printers: Vec<String>,
     pub printer_option: usize,
     pub selected_printer: Option<String>,
@@ -206,7 +218,7 @@ impl App {
             vinculo_criar_option: 0,
             vinculo_lista_option: 0,
             lista_precos_option: 0,
-            lista_precos_tipo: ListaPrecoTipo::Atacado,
+            lista_precos_tipo: ListaPrecoTipo::Custo,
             lista_precos_tecido_option: 0,
             lista_precos_tecido_detail_option: 0,
             lista_precos_vinculo_option: 0,
@@ -306,10 +318,14 @@ impl App {
             shopee_update_confirm: false,
             shopee_update_plans: Vec::new(),
             shopee_status,
+            shopee_task_started: None,
+            shopee_task_rx: None,
             documentos_option: 0,
             checklist_active: false,
             checklist_cursor: 0,
             checklist_selected_tecidos: Vec::new(),
+            checklist_pdf_started: None,
+            checklist_pdf_rx: None,
             printers,
             printer_option,
             selected_printer,
@@ -326,6 +342,8 @@ impl App {
         while self.running {
             self.drain_chat_reply();
             self.drain_vinculo_image_upload();
+            self.drain_checklist_pdf();
+            self.drain_shopee_task();
             terminal.draw(|frame| self.render(frame))?;
 
             let timeout = Duration::from_millis(250)
@@ -357,6 +375,77 @@ impl App {
             self.chat_reply_rx = None;
             self.chat.messages.push(ChatMessage::assistant(reply));
         }
+    }
+
+    fn drain_checklist_pdf(&mut self) {
+        let status = self
+            .checklist_pdf_rx
+            .as_ref()
+            .and_then(|receiver| receiver.try_recv().ok());
+        if let Some(status) = status {
+            self.checklist_pdf_started = None;
+            self.checklist_pdf_rx = None;
+            self.db_status = status;
+        }
+    }
+
+    fn drain_shopee_task(&mut self) {
+        let result = self
+            .shopee_task_rx
+            .as_ref()
+            .and_then(|receiver| receiver.try_recv().ok());
+        let Some(result) = result else {
+            return;
+        };
+
+        self.shopee_task_started = None;
+        self.shopee_task_rx = None;
+
+        match result {
+            ShopeeTaskResult::StockFetch(Ok(groups)) => {
+                let occurrences = groups
+                    .iter()
+                    .flat_map(|parent| parent.groups.iter())
+                    .map(|group| group.occurrences.len())
+                    .sum::<usize>();
+                self.shopee_stock_groups = groups;
+                self.shopee_stock_cursor = 0;
+                self.shopee_status = format!(
+                    "Estoque Online carregado: {} SKUs Pai, {} variacoes, {occurrences} anuncios/modelos. Enter expande; Space alterna variacao 0/100.",
+                    self.shopee_stock_groups.len(),
+                    self.shopee_stock_groups
+                        .iter()
+                        .map(|parent| parent.groups.len())
+                        .sum::<usize>()
+                );
+            }
+            ShopeeTaskResult::StockFetch(Err(status)) => {
+                self.shopee_status = status;
+            }
+            ShopeeTaskResult::StockSync(status) => {
+                self.shopee_stock_confirm = false;
+                self.shopee_status = status;
+            }
+            ShopeeTaskResult::CreateListing(status) => {
+                self.shopee_listing_confirm = false;
+                self.shopee_status = status;
+            }
+            ShopeeTaskResult::PreviewUpdates(Ok((plans, status, confirm))) => {
+                self.shopee_update_plans = plans;
+                self.shopee_update_confirm = confirm;
+                self.shopee_status = status;
+            }
+            ShopeeTaskResult::PreviewUpdates(Err(status)) => {
+                self.shopee_status = status;
+            }
+            ShopeeTaskResult::ApplyUpdates(status) => {
+                self.shopee_update_confirm = false;
+                self.shopee_update_active = false;
+                self.shopee_update_plans.clear();
+                self.shopee_status = status;
+            }
+        }
+        self.db_status = self.shopee_status.clone();
     }
 
     fn handle_key(&mut self, key: KeyEvent) {
@@ -489,9 +578,9 @@ impl App {
                 DadosScreen::VinculosLista => self.previous_vinculo_lista(),
                 DadosScreen::VinculoDetalhe => self.previous_vinculo_image_slot(),
                 DadosScreen::ListaPrecosMenu => self.previous_lista_precos_option(),
-                DadosScreen::ListaPrecosAtacado | DadosScreen::ListaPrecosVarejo => {
-                    self.previous_lista_precos_tecido()
-                }
+                DadosScreen::ListaPrecosCusto
+                | DadosScreen::ListaPrecosAtacado
+                | DadosScreen::ListaPrecosVarejo => self.previous_lista_precos_tecido(),
                 DadosScreen::ListaPrecosTecido => self.previous_lista_precos_tecido_detail_option(),
                 DadosScreen::ListaPrecosVinculos => self.previous_lista_precos_vinculo(),
                 DadosScreen::CadastrarTecido
@@ -510,9 +599,9 @@ impl App {
                 DadosScreen::VinculosLista => self.next_vinculo_lista(),
                 DadosScreen::VinculoDetalhe => self.next_vinculo_image_slot(),
                 DadosScreen::ListaPrecosMenu => self.next_lista_precos_option(),
-                DadosScreen::ListaPrecosAtacado | DadosScreen::ListaPrecosVarejo => {
-                    self.next_lista_precos_tecido()
-                }
+                DadosScreen::ListaPrecosCusto
+                | DadosScreen::ListaPrecosAtacado
+                | DadosScreen::ListaPrecosVarejo => self.next_lista_precos_tecido(),
                 DadosScreen::ListaPrecosTecido => self.next_lista_precos_tecido_detail_option(),
                 DadosScreen::ListaPrecosVinculos => self.next_lista_precos_vinculo(),
                 DadosScreen::CadastrarTecido
@@ -580,6 +669,9 @@ impl App {
                     self.handle_vinculo_detalhe_enter();
                 } else if self.dados_screen == DadosScreen::ListaPrecosMenu {
                     if self.lista_precos_option == 0 {
+                        self.lista_precos_tipo = ListaPrecoTipo::Custo;
+                        self.dados_screen = DadosScreen::ListaPrecosCusto;
+                    } else if self.lista_precos_option == 1 {
                         self.lista_precos_tipo = ListaPrecoTipo::Atacado;
                         self.dados_screen = DadosScreen::ListaPrecosAtacado;
                     } else {
@@ -589,7 +681,9 @@ impl App {
                     self.lista_precos_tecido_option = 0;
                 } else if matches!(
                     self.dados_screen,
-                    DadosScreen::ListaPrecosAtacado | DadosScreen::ListaPrecosVarejo
+                    DadosScreen::ListaPrecosCusto
+                        | DadosScreen::ListaPrecosAtacado
+                        | DadosScreen::ListaPrecosVarejo
                 ) {
                     self.open_lista_precos_tecido();
                 } else if self.dados_screen == DadosScreen::ListaPrecosTecido {
@@ -671,6 +765,17 @@ impl App {
     }
 
     fn handle_shopee_key(&mut self, key: KeyCode) {
+        if self.shopee_task_rx.is_some() {
+            match key {
+                KeyCode::Left => self.section = self.section.previous(),
+                KeyCode::Right => self.section = self.section.next(),
+                _ => {
+                    self.shopee_status = String::from("Shopee: aguarde a operacao atual terminar.")
+                }
+            }
+            return;
+        }
+
         if self.shopee_update_confirm {
             match key {
                 KeyCode::Esc | KeyCode::Char('n') | KeyCode::Char('N') => {
@@ -783,26 +888,7 @@ impl App {
                         .selected_shopee_stock_child()
                         .into_iter()
                         .collect::<Vec<_>>();
-                    let status = match self
-                        .db_runtime
-                        .block_on(shopee::sync_stock_groups(self.db_pool.as_ref(), &groups))
-                    {
-                        Ok(result) => format!(
-                            "Sync Shopee concluido. Atualizados: {}. Ignorados: {}. Falhas: {}{}",
-                            result.updated,
-                            result.skipped,
-                            result.failed.len(),
-                            if result.failed.is_empty() {
-                                String::new()
-                            } else {
-                                format!(". {}", result.failed.join(" | "))
-                            }
-                        ),
-                        Err(error) => format!("Shopee: falha ao sincronizar estoque: {error}"),
-                    };
-                    self.shopee_stock_confirm = false;
-                    self.shopee_status = status.clone();
-                    self.db_status = status;
+                    self.start_shopee_stock_sync(groups);
                 }
                 _ => {}
             }
@@ -854,29 +940,8 @@ impl App {
                             .block_on(shopee::create_listing_status(self.db_pool.as_ref()))
                     }
                     1 if self.shopee_stock_groups.is_empty() => {
-                        match self
-                            .db_runtime
-                            .block_on(shopee::fetch_online_stock_groups(self.db_pool.as_ref()))
-                        {
-                            Ok(groups) => {
-                                let occurrences = groups
-                                    .iter()
-                                    .flat_map(|parent| parent.groups.iter())
-                                    .map(|group| group.occurrences.len())
-                                    .sum::<usize>();
-                                self.shopee_stock_groups = groups;
-                                self.shopee_stock_cursor = 0;
-                                format!(
-                                    "Estoque Online carregado: {} SKUs Pai, {} variacoes, {occurrences} anuncios/modelos. Enter expande; Space alterna variacao 0/100.",
-                                    self.shopee_stock_groups.len(),
-                                    self.shopee_stock_groups
-                                        .iter()
-                                        .map(|parent| parent.groups.len())
-                                        .sum::<usize>()
-                                )
-                            }
-                            Err(error) => format!("Shopee: falha ao consultar estoque: {error}"),
-                        }
+                        self.start_shopee_stock_fetch();
+                        String::from("Shopee: consultando estoque online em segundo plano...")
                     }
                     1 => match self.current_shopee_stock_target() {
                         Some(ShopeeStockCursorTarget::Parent(parent_index)) => {
@@ -991,6 +1056,65 @@ impl App {
         }
     }
 
+    fn start_shopee_task<F>(&mut self, status: &str, task: F)
+    where
+        F: FnOnce() -> ShopeeTaskResult + Send + 'static,
+    {
+        let (tx, rx) = mpsc::channel();
+        self.shopee_task_started = Some(Instant::now());
+        self.shopee_task_rx = Some(rx);
+        self.shopee_status = status.to_string();
+        self.db_status = self.shopee_status.clone();
+        thread::spawn(move || {
+            let _ = tx.send(task());
+        });
+    }
+
+    fn start_shopee_stock_fetch(&mut self) {
+        let pool = self.db_pool.clone();
+        self.start_shopee_task(
+            "Shopee: consultando estoque online em segundo plano...",
+            move || {
+                let runtime = match Runtime::new() {
+                    Ok(runtime) => runtime,
+                    Err(error) => {
+                        return ShopeeTaskResult::StockFetch(Err(format!(
+                            "Shopee: falha ao iniciar consulta: {error}"
+                        )));
+                    }
+                };
+                ShopeeTaskResult::StockFetch(
+                    runtime
+                        .block_on(shopee::fetch_online_stock_groups(pool.as_ref()))
+                        .map_err(|error| format!("Shopee: falha ao consultar estoque: {error}")),
+                )
+            },
+        );
+    }
+
+    fn start_shopee_stock_sync(&mut self, groups: Vec<shopee::ShopeeStockGroup>) {
+        let pool = self.db_pool.clone();
+        self.start_shopee_task(
+            "Shopee: sincronizando estoque em segundo plano...",
+            move || {
+                let runtime = match Runtime::new() {
+                    Ok(runtime) => runtime,
+                    Err(error) => {
+                        return ShopeeTaskResult::StockSync(format!(
+                            "Shopee: falha ao iniciar sincronizacao: {error}"
+                        ));
+                    }
+                };
+                let status =
+                    match runtime.block_on(shopee::sync_stock_groups(pool.as_ref(), &groups)) {
+                        Ok(result) => format_shopee_stock_sync_result(result),
+                        Err(error) => format!("Shopee: falha ao sincronizar estoque: {error}"),
+                    };
+                ShopeeTaskResult::StockSync(status)
+            },
+        );
+    }
+
     fn create_selected_shopee_listing(&mut self) {
         let Some(tecido) = self.tecidos.get(self.shopee_listing_tecido_option).cloned() else {
             self.shopee_status = String::from("Nenhum tecido selecionado.");
@@ -1003,49 +1127,14 @@ impl App {
             self.shopee_listing_confirm = false;
             return;
         };
-        let vinculos_result = match tecido.tipo.as_str() {
-            "Estampado" => self.db_pool.as_ref().map(|pool| {
-                self.db_runtime
-                    .block_on(db::list_estampa_vinculos_by_tecido(pool, tecido.id))
-            }),
-            _ => self.db_pool.as_ref().map(|pool| {
-                self.db_runtime
-                    .block_on(db::list_vinculos_by_tecido(pool, tecido.id))
-            }),
-        };
-        let Some(vinculos_result) = vinculos_result else {
+        let Some(pool) = self.db_pool.clone() else {
             self.shopee_status = String::from("Banco local indisponivel para carregar vinculos.");
             self.shopee_listing_confirm = false;
             return;
         };
-        let vinculos = match vinculos_result {
-            Ok(vinculos) => vinculos,
-            Err(error) => {
-                self.shopee_status = format!("Falha ao carregar vinculos do tecido: {error}");
-                self.shopee_listing_confirm = false;
-                return;
-            }
-        };
-        let status = match self.db_runtime.block_on(shopee::create_fabric_listing(
-            self.db_pool.as_ref(),
-            &tecido,
-            &vinculos,
-            price,
-        )) {
-            Ok(result) => format!(
-                "Anuncio Shopee criado NORMAL. item_id {} | SKU {} | {} cores x {} tamanhos = {} variacoes | imagem {}",
-                result.item_id,
-                result.sku,
-                result.color_count,
-                result.size_count,
-                result.model_count,
-                result.image_id
-            ),
-            Err(error) => format!("Shopee: falha ao criar anuncio: {error}"),
-        };
-        self.shopee_listing_confirm = false;
-        self.shopee_status = status.clone();
-        self.db_status = status;
+        self.start_shopee_task("Shopee: criando anuncio em segundo plano...", move || {
+            ShopeeTaskResult::CreateListing(create_shopee_listing_worker(pool, tecido, price))
+        });
     }
 
     fn preview_selected_shopee_listing_updates(&mut self) {
@@ -1053,67 +1142,13 @@ impl App {
             self.shopee_status = String::from("Nenhum tecido selecionado.");
             return;
         };
-        let vinculos_result = match tecido.tipo.as_str() {
-            "Estampado" => self.db_pool.as_ref().map(|pool| {
-                self.db_runtime
-                    .block_on(db::list_estampa_vinculos_by_tecido(pool, tecido.id))
-            }),
-            _ => self.db_pool.as_ref().map(|pool| {
-                self.db_runtime
-                    .block_on(db::list_vinculos_by_tecido(pool, tecido.id))
-            }),
-        };
-        let Some(vinculos_result) = vinculos_result else {
+        let Some(pool) = self.db_pool.clone() else {
             self.shopee_status = String::from("Banco local indisponivel para carregar vinculos.");
             return;
         };
-        let vinculos = match vinculos_result {
-            Ok(vinculos) => vinculos,
-            Err(error) => {
-                self.shopee_status = format!("Falha ao carregar vinculos do tecido: {error}");
-                return;
-            }
-        };
-
-        match self.db_runtime.block_on(shopee::preview_listing_updates(
-            self.db_pool.as_ref(),
-            &tecido,
-            &vinculos,
-        )) {
-            Ok(plans) => {
-                let updatable = plans
-                    .iter()
-                    .filter(|plan| plan.blocked_reason.is_none() && plan.model_count > 0)
-                    .count();
-                let models = plans.iter().map(|plan| plan.model_count).sum::<usize>();
-                let blocked = plans
-                    .iter()
-                    .filter(|plan| plan.blocked_reason.is_some())
-                    .count();
-                self.shopee_update_plans = plans;
-                self.shopee_update_confirm = updatable > 0;
-                self.shopee_status = if self.shopee_update_plans.is_empty() {
-                    format!(
-                        "Nenhum anuncio Shopee encontrado para SKU Pai {}.",
-                        tecido.sku
-                    )
-                } else if updatable > 0 {
-                    format!(
-                        "Previa pronta para SKU {}: {} anuncios atualizaveis, {} modelos novos, {} bloqueados. Enter/S confirma; Esc/N cancela.",
-                        tecido.sku, updatable, models, blocked
-                    )
-                } else {
-                    format!(
-                        "Previa pronta para SKU {}: nenhum modelo novo para adicionar; {} bloqueados.",
-                        tecido.sku, blocked
-                    )
-                };
-            }
-            Err(error) => {
-                self.shopee_status = format!("Shopee: falha ao montar previa: {error}");
-            }
-        }
-        self.db_status = self.shopee_status.clone();
+        self.start_shopee_task("Shopee: montando previa em segundo plano...", move || {
+            ShopeeTaskResult::PreviewUpdates(preview_shopee_updates_worker(pool, tecido))
+        });
     }
 
     fn apply_selected_shopee_listing_updates(&mut self) {
@@ -1122,29 +1157,28 @@ impl App {
             self.shopee_update_confirm = false;
             return;
         }
-        let status = match self.db_runtime.block_on(shopee::apply_listing_update_plans(
-            self.db_pool.as_ref(),
-            &self.shopee_update_plans,
-        )) {
-            Ok(result) => format!(
-                "Atualizacao Shopee concluida. Anuncios: {}. Modelos adicionados: {}. Ignorados: {}. Falhas: {}{}",
-                result.updated_items,
-                result.added_models,
-                result.skipped_items,
-                result.failed.len(),
-                if result.failed.is_empty() {
-                    String::new()
-                } else {
-                    format!(". {}", result.failed.join(" | "))
-                }
-            ),
-            Err(error) => format!("Shopee: falha ao atualizar anuncios: {error}"),
-        };
-        self.shopee_update_confirm = false;
-        self.shopee_update_active = false;
-        self.shopee_update_plans.clear();
-        self.shopee_status = status.clone();
-        self.db_status = status;
+        let pool = self.db_pool.clone();
+        let plans = self.shopee_update_plans.clone();
+        self.start_shopee_task(
+            "Shopee: atualizando anuncios em segundo plano...",
+            move || {
+                let runtime = match Runtime::new() {
+                    Ok(runtime) => runtime,
+                    Err(error) => {
+                        return ShopeeTaskResult::ApplyUpdates(format!(
+                            "Shopee: falha ao iniciar atualizacao: {error}"
+                        ));
+                    }
+                };
+                let status = match runtime
+                    .block_on(shopee::apply_listing_update_plans(pool.as_ref(), &plans))
+                {
+                    Ok(result) => format_shopee_listing_update_result(result),
+                    Err(error) => format!("Shopee: falha ao atualizar anuncios: {error}"),
+                };
+                ShopeeTaskResult::ApplyUpdates(status)
+            },
+        );
     }
 
     fn submit_chat(&mut self) {
@@ -1316,7 +1350,7 @@ impl App {
         let pedido_total = self.pedido_itens.iter().map(VendaItem::total).sum::<f64>();
 
         format!(
-            "Projeto Razai TUI: sistema terminal para loja de tecidos com Dashboard, Vendas, Pedidos, Dados, Estoque, Shopee, Documentos e Configuracoes. Tela atual: {}. Status: {}. Dados carregados: {} tecidos, {} cores, {} estampas, {} vendas no periodo {}..{}, {} pedidos. Tecidos: {}. Cores: {}. Estampas: {}. Vendas recentes: {}. Pedidos recentes: {}. Venda em andamento: {} itens, total R${}, preco='{}', quantidade='{}'. Pedido em andamento: {} itens, total R${}, preco='{}', quantidade='{}'. Impressora: {}. Formulario tecido: nome='{}', composicao='{}', largura='{}', custo_base='{}', tipo='{}'. Regras: gravacoes exigem confirmacao; vendas viram historico; pedidos geram PDF em pdf_pedidos e podem ser aprovados como venda; documentos geram checklist PDF fora do workspace em Documents\\Razai\\checklists.",
+            "Projeto Razai TUI: sistema terminal para loja de tecidos com Dashboard, Vendas, Pedidos, Dados, Estoque, Shopee, Documentos e Configuracoes. Tela atual: {}. Status: {}. Dados carregados: {} tecidos, {} cores, {} estampas, {} vendas no periodo {}..{}, {} pedidos. Tecidos: {}. Cores: {}. Estampas: {}. Vendas recentes: {}. Pedidos recentes: {}. Venda em andamento: {} itens, total R${}, preco='{}', quantidade='{}'. Pedido em andamento: {} itens, total R${}, preco='{}', quantidade='{}'. Impressora: {}. Formulario tecido: nome='{}', composicao='{}', largura='{}', tipo='{}'. Custo base fica em Dados > Lista de Precos > Custo Base. Regras: gravacoes exigem confirmacao; vendas viram historico; pedidos geram PDF em pdf_pedidos e podem ser aprovados como venda; documentos geram checklist PDF fora do workspace em Documents\\Razai\\checklists.",
             self.section.title(),
             self.db_status,
             self.tecidos.len(),
@@ -1343,7 +1377,6 @@ impl App {
             self.tecido_form.nome,
             self.tecido_form.composicao,
             self.tecido_form.largura,
-            self.tecido_form.custo_base,
             self.tecido_form.tipo.value(TIPO_OPTIONS)
         )
     }
@@ -1423,6 +1456,119 @@ impl App {
             self.vendas_screen,
         )
     }
+}
+
+fn create_shopee_listing_worker(pool: PgPool, tecido: TecidoRecord, price: f64) -> String {
+    let runtime = match Runtime::new() {
+        Ok(runtime) => runtime,
+        Err(error) => return format!("Shopee: falha ao iniciar criacao de anuncio: {error}"),
+    };
+    let vinculos = match load_vinculos_for_tecido(&runtime, &pool, &tecido) {
+        Ok(vinculos) => vinculos,
+        Err(status) => return status,
+    };
+    match runtime.block_on(shopee::create_fabric_listing(
+        Some(&pool),
+        &tecido,
+        &vinculos,
+        price,
+    )) {
+        Ok(result) => format!(
+            "Anuncio Shopee criado NORMAL. item_id {} | SKU {} | {} cores x {} tamanhos = {} variacoes | imagem {}",
+            result.item_id,
+            result.sku,
+            result.color_count,
+            result.size_count,
+            result.model_count,
+            result.image_id
+        ),
+        Err(error) => format!("Shopee: falha ao criar anuncio: {error}"),
+    }
+}
+
+fn preview_shopee_updates_worker(
+    pool: PgPool,
+    tecido: TecidoRecord,
+) -> Result<(Vec<shopee::ShopeeListingUpdatePlan>, String, bool), String> {
+    let runtime =
+        Runtime::new().map_err(|error| format!("Shopee: falha ao iniciar previa: {error}"))?;
+    let vinculos = load_vinculos_for_tecido(&runtime, &pool, &tecido)?;
+    let plans = runtime
+        .block_on(shopee::preview_listing_updates(
+            Some(&pool),
+            &tecido,
+            &vinculos,
+        ))
+        .map_err(|error| format!("Shopee: falha ao montar previa: {error}"))?;
+    let updatable = plans
+        .iter()
+        .filter(|plan| plan.blocked_reason.is_none() && plan.model_count > 0)
+        .count();
+    let models = plans.iter().map(|plan| plan.model_count).sum::<usize>();
+    let blocked = plans
+        .iter()
+        .filter(|plan| plan.blocked_reason.is_some())
+        .count();
+    let confirm = updatable > 0;
+    let status = if plans.is_empty() {
+        format!(
+            "Nenhum anuncio Shopee encontrado para SKU Pai {}.",
+            tecido.sku
+        )
+    } else if updatable > 0 {
+        format!(
+            "Previa pronta para SKU {}: {} anuncios atualizaveis, {} modelos novos, {} bloqueados. Enter/S confirma; Esc/N cancela.",
+            tecido.sku, updatable, models, blocked
+        )
+    } else {
+        format!(
+            "Previa pronta para SKU {}: nenhum modelo novo para adicionar; {} bloqueados.",
+            tecido.sku, blocked
+        )
+    };
+    Ok((plans, status, confirm))
+}
+
+fn load_vinculos_for_tecido(
+    runtime: &Runtime,
+    pool: &PgPool,
+    tecido: &TecidoRecord,
+) -> Result<Vec<VinculoRecord>, String> {
+    let result = if tecido.tipo == "Estampado" {
+        runtime.block_on(db::list_estampa_vinculos_by_tecido(pool, tecido.id))
+    } else {
+        runtime.block_on(db::list_vinculos_by_tecido(pool, tecido.id))
+    };
+    result.map_err(|error| format!("Falha ao carregar vinculos do tecido: {error}"))
+}
+
+fn format_shopee_stock_sync_result(result: shopee::ShopeeStockSyncResult) -> String {
+    format!(
+        "Sync Shopee concluido. Atualizados: {}. Ignorados: {}. Falhas: {}{}",
+        result.updated,
+        result.skipped,
+        result.failed.len(),
+        if result.failed.is_empty() {
+            String::new()
+        } else {
+            format!(". {}", result.failed.join(" | "))
+        }
+    )
+}
+
+fn format_shopee_listing_update_result(result: shopee::ShopeeListingUpdateResult) -> String {
+    format!(
+        "Atualizacao Shopee concluida. Anuncios: {}. Modelos adicionados: {}. Ignorados: {}. Falhas: {}{}",
+        result.updated_items,
+        result.added_models,
+        result.skipped_items,
+        result.failed.len(),
+        if result.failed.is_empty() {
+            String::new()
+        } else {
+            format!(". {}", result.failed.join(" | "))
+        }
+    )
 }
 
 fn format_delta_e_threshold(value: f64) -> String {
